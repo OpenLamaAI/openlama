@@ -1,0 +1,57 @@
+# ── Environment & Secrets ──
+.env
+.env.local
+.env.*.local
+
+# ── Database ──
+*.db
+*.db-journal
+*.sqlite
+*.sqlite3
+
+# ── Python ──
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+*.egg-info/
+*.egg
+dist/
+build/
+*.whl
+
+# ── Virtual Environment ──
+.venv/
+venv/
+ENV/
+
+# ── Testing / Lint Cache ──
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+.coverage
+htmlcov/
+
+# ── IDE ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── OS ──
+.DS_Store
+Thumbs.db
+
+# ── Uploads & Temp ──
+tmp_uploads/
+*.tmp
+
+# ── Logs ──
+*.log
+
+# ── Docs (계획/내부 문서 — 코드만 관리) ──
+docs/
+
+# ── Config (런타임 생성) ──
+tob.pid
