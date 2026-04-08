@@ -54,8 +54,9 @@ tmp_uploads/
 # Config (runtime generated)
 *.pid
 
-# Docs (internal planning docs)
-docs/
+# Docs (internal planning docs, except translated READMEs)
+docs/*
+!docs/README_*.md
 
 # Claude Code
 .claude/

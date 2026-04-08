@@ -1,0 +1,453 @@
+<p align="center">
+  <h1 align="center">openlama</h1>
+  <p align="center">
+    <a href="https://ollama.com">Ollama</a> 기반의 완전 로컬 AI 에이전트 봇.<br>
+    텔레그램 또는 터미널에서 도구 호출, 이미지 생성, 예약 작업, 커스텀 스킬을 사용하세요.<br>
+    모든 데이터는 내 컴퓨터에서만 처리됩니다.
+  </p>
+  <p align="center">
+    <a href="https://pypi.org/project/openlama/"><img src="https://img.shields.io/pypi/v/openlama" alt="PyPI"></a>
+    <a href="https://pypi.org/project/openlama/"><img src="https://img.shields.io/pypi/pyversions/openlama" alt="Python"></a>
+    <a href="../LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue" alt="License"></a>
+  </p>
+  <p align="center">
+    <b><a href="../README.md">English</a></b>
+  </p>
+</p>
+
+---
+
+## 왜 openlama인가?
+
+대부분의 AI 비서는 데이터를 클라우드 서버로 보냅니다. openlama는 Ollama를 사용하여 로컬에서 완전히 실행되며, 도구 접근 권한이 있는 개인 AI 에이전트를 제공합니다. 데이터 유출 제로.
+
+[Gemma 4](https://blog.google/innovation-and-ai/technology/developers-tools/gemma-4/) 모델에 최적화되어 있으며, Ollama 호환 모델이라면 모두 사용 가능합니다.
+
+---
+
+## 특징
+
+- **100% 로컬** — 클라우드 API 없음. 모든 처리가 내 하드웨어에서 실행.
+- **듀얼 채널** — 텔레그램 봇 + 터미널 TUI. 대화 컨텍스트 공유.
+- **18개 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git 등.
+- **커스텀 스킬** — 키워드에 자동 트리거되는 재사용 가능한 지침 세트.
+- **MCP 지원** — [Model Context Protocol](https://modelcontextprotocol.io)로 외부 도구 서버 연결.
+- **예약 작업** — 크론 기반 반복 작업을 AI가 실행.
+- **멀티 프롬프트** — SOUL, USERS, MEMORY, SYSTEM 프롬프트를 분리하여 세밀하게 제어.
+- **자동 업데이트** — `openlama update`로 openlama와 Ollama 동시 업데이트.
+- **크로스 플랫폼** — macOS, Linux, Windows.
+- **자가 복구** — `openlama doctor fix`로 문제 자동 진단 및 수리.
+
+---
+
+## 빠른 시작
+
+### 1. 설치
+
+```bash
+# 권장
+uv tool install openlama
+
+# 또는 pip
+pip install openlama
+```
+
+### 2. 초기 설정
+
+```bash
+openlama setup
+```
+
+대화형 마법사가 진행됩니다:
+
+```
+  ● Step 1/5 — Ollama
+  ✓ Ollama is installed
+  ✓ Ollama server running (v0.20.3)
+
+  ● Step 2/5 — Models
+  ? Select models to download:
+    ✓ gemma4:e4b       9.6 GB  [recommended]
+      qwen3:8b         5.2 GB  [light]
+
+  gemma4:e4b (pulling manifest)  ━━━━━━━━━━━━━━  4.2/9.6 GB  52.3 MB/s  0:01:43
+
+  ● Step 3/5 — Channel
+  ? Enter Telegram bot token (@BotFather): 1234567890:ABC...
+  ✓ Connected: @your_bot_name
+
+  ● Step 4/5 — Password
+  ? Set admin password: ********
+
+  ● Step 5/5 — Features
+  ✓ ComfyUI detected: macOS Desktop App
+
+  ╭─────────────────────────────────────────────╮
+  │  ✅ Setup complete!                          │
+  │                                              │
+  │  Start:   openlama start                     │
+  │  Chat:    openlama chat                      │
+  │  Doctor:  openlama doctor                    │
+  ╰─────────────────────────────────────────────╯
+```
+
+### 3. 실행
+
+```bash
+# 텔레그램 봇을 백그라운드로 실행
+openlama start -d
+
+# 터미널 채팅 열기 (텔레그램과 컨텍스트 공유)
+openlama chat
+```
+
+### 4. 상태 진단
+
+```bash
+openlama doctor
+```
+
+```
+  ✓  Data directory         /home/user/.config/openlama
+  ✓  Database               7 tables
+  ✓  Telegram bot token     Set (12345678...nqbw)
+  ✓  Python dependencies    All critical packages available
+  ✓  Boot service           systemd user service registered
+  ✓  Ollama server          Connected (http://127.0.0.1:11434)
+  ✓  Ollama version         v0.20.3 (latest)
+  ✓  Ollama models          3 models available
+
+  17 passed · 1 warning(s)
+```
+
+---
+
+## 터미널 채팅 (TUI)
+
+```bash
+openlama chat
+```
+
+```
+──────────────────────────── openlama ─────────────────────────────
+  model: gemma4:e4b | ctx: 12% (8 turns) | telegram: @your_bot
+  Type / for commands, /quit to exit.
+
+You: 서울 날씨 알려줘
+
+╭──────────────────────────── AI ─────────────────────────────────╮
+│                                                                  │
+│  검색해보겠습니다.                                                 │
+│                                                                  │
+│  현재 서울 기온은 18°C, 구름 약간 끼어 있습니다.                     │
+│  습도 45%, 북서풍 약풍입니다.                                      │
+│                                                                  │
+╰──────────────────────────────────────────────────────────────────╯
+  📊 ██░░░░░░░░░░░░░░░░░░ 12.3% (2,841/32,768 tokens)  |  turns: 9
+```
+
+### 채팅 명령어
+
+`/` 를 입력하면 모든 명령어를 확인할 수 있습니다:
+
+```
+  Chat
+    /help             명령어 목록
+    /clear            대화 컨텍스트 초기화
+    /status           세션 및 컨텍스트 정보
+    /export           대화 내보내기
+    /profile          프로필 재설정
+    /quit             채팅 종료
+
+  Model
+    /model            현재 모델 변경
+    /models           사용 가능한 모델 목록
+    /pull             새 모델 다운로드
+
+  Settings
+    /settings         모델 파라미터 보기/수정
+    /set <p> <v>      파라미터 변경
+    /think            추론 모드 토글
+    /systemprompt     프롬프트 파일 보기/편집
+
+  System
+    /ollama           Ollama 서버 상태
+    /skills           스킬 목록
+    /mcp              MCP 서버 상태
+    /cron             예약 작업 관리
+```
+
+---
+
+## 텔레그램 봇
+
+`openlama start` 후 텔레그램에서 봇에 메시지를 보내세요:
+
+1. **로그인** — 메시지 전송 → 관리자 비밀번호 입력
+2. **프로필 설정** — 언어 선택, 자기소개, 에이전트 정체성 설정
+3. **채팅** — 대화 시작. 봇이 자동으로 도구를 사용합니다.
+
+### 텔레그램 기능
+
+- 설정, 모델 선택을 위한 인라인 키보드 메뉴
+- 실시간 스트리밍 응답
+- 이미지/문서/오디오 분석
+- 토큰 사용량 표시 컨텍스트 바
+- 인라인 버튼으로 프롬프트 파일 편집
+
+---
+
+## 내장 도구 (18개)
+
+| 도구 | 설명 |
+|------|------|
+| `web_search` | DuckDuckGo 웹 검색 |
+| `url_fetch` | URL에서 텍스트 추출 |
+| `calculator` | 수학 연산 |
+| `code_execute` | Python, Node.js, Shell 코드 실행 |
+| `shell_command` | 시스템 명령 실행 |
+| `file_read` | 파일 읽기 / 디렉토리 목록 |
+| `file_write` | 파일 쓰기 / 추가 |
+| `git` | Git 작업 (status, log, diff, commit) |
+| `process_manager` | 프로세스 관리, 시스템 상태 |
+| `image_generate` | ComfyUI 텍스트→이미지 |
+| `image_edit` | ComfyUI 이미지 편집 |
+| `memory` | 장기 기억 저장/검색/삭제 |
+| `skill_creator` | 커스텀 스킬 생성/관리 |
+| `mcp_manager` | MCP 서버 설치/관리 |
+| `cron_manager` | 예약 작업 등록/관리 |
+| `get_datetime` | 현재 날짜/시간 |
+| `obsidian_tool` | 옵시디언 노트 읽기/쓰기 (선택) |
+
+AI는 어떤 언어로 요청해도 도구를 사용합니다:
+
+> "서버 상태 확인해줘" → `shell_command`
+> "search for latest AI news" → `web_search`
+> "매일 10시에 뉴스 요약해줘" → `cron_manager`
+
+---
+
+## 커스텀 스킬
+
+키워드에 자동으로 활성화되는 스킬 생성:
+
+### CLI로 생성
+
+```bash
+openlama skill create
+```
+
+### 대화로 생성
+
+> "코드 리뷰를 해달라고 하면 트리거되는 스킬을 만들어줘"
+
+### 스킬 파일 형식
+
+`~/.config/openlama/skills/<이름>/SKILL.md`:
+
+```markdown
+---
+name: code-reviewer
+description: "코드 리뷰 요청 시 활성화"
+trigger: "리뷰, 코드 리뷰, 검토해줘"
+---
+
+## 규칙
+1. 사용자가 지정한 파일을 읽는다
+2. 버그, 보안 이슈, 성능 문제를 확인한다
+3. 코드 예시와 함께 개선점을 제안한다
+```
+
+---
+
+## MCP 연동
+
+[Model Context Protocol](https://modelcontextprotocol.io)로 외부 도구 연결:
+
+```bash
+openlama mcp add github npx -y @github/github-mcp
+openlama mcp add filesystem npx -y @modelcontextprotocol/server-filesystem /home
+openlama mcp list
+openlama mcp remove github
+```
+
+---
+
+## 예약 작업
+
+자연어로 예약 — AI가 크론 표현식으로 변환:
+
+> "매 시간 디스크 사용량 확인해줘" → `0 */1 * * *`
+> "매일 아침 9시에 기술 뉴스 요약해줘" → `0 9 * * *`
+> "5분마다 서버 상태 모니터링해줘" → `*/5 * * * *`
+
+실행마다 AI가 도구를 사용하여 1회성으로 작업을 수행하고, 결과를 채팅으로 전송합니다.
+
+```bash
+openlama cron list       # 작업 목록
+openlama cron delete 1   # 작업 삭제
+```
+
+---
+
+## 프롬프트 시스템
+
+| 파일 | 용도 | 편집 가능 |
+|------|------|----------|
+| `SYSTEM.md` | 도구, 규칙, 스킬 목록 | 매 요청 시 자동 생성 |
+| `SOUL.md` | 에이전트 정체성과 성격 | `/systemprompt`로 편집 |
+| `USERS.md` | 사용자 프로필과 언어 | `/systemprompt`로 편집 |
+| `MEMORY.md` | 장기 기억 항목 | `memory` 도구로 관리 |
+
+모든 파일은 `~/.config/openlama/prompts/`에 있으며:
+- **텔레그램**: `/systemprompt` → 파일 선택 → 내용 확인 → 수정 후 전송
+- **CLI**: `/systemprompt` → `$EDITOR` (nano/vim/code)로 직접 편집
+
+---
+
+## 디렉토리 구조
+
+```
+~/.config/openlama/
+├── openlama.db              # SQLite (설정, 사용자, 컨텍스트, 크론)
+├── openlama.pid             # 데몬 PID 파일
+├── openlama.log             # 데몬 로그
+├── mcp.json                 # MCP 서버 설정
+├── prompts/
+│   ├── SYSTEM.md            # 자동 생성 시스템 프롬프트
+│   ├── SOUL.md              # 에이전트 정체성
+│   ├── USERS.md             # 사용자 프로필
+│   └── MEMORY.md            # 장기 기억
+├── skills/
+│   └── <이름>/SKILL.md       # 커스텀 스킬
+└── workflows/
+    ├── txt2img_default.json  # ComfyUI 텍스트→이미지
+    └── img2img_default.json  # ComfyUI 이미지→이미지
+```
+
+---
+
+## CLI 명령어 전체 목록
+
+| 명령어 | 설명 |
+|--------|------|
+| `openlama setup` | 대화형 초기 설정 |
+| `openlama start` | 텔레그램 봇 실행 (포그라운드) |
+| `openlama start -d` | 백그라운드 데몬 실행 |
+| `openlama start --install-service` | OS 서비스 등록 (부팅 시 자동 시작) |
+| `openlama stop` | 데몬 중지 |
+| `openlama restart` | 데몬 재시작 |
+| `openlama chat` | 터미널 채팅 TUI |
+| `openlama status` | 연결 및 프로세스 상태 |
+| `openlama doctor` | 진단 실행 (18개 항목) |
+| `openlama doctor fix` | 자동 수정 |
+| `openlama update` | openlama + Ollama 업데이트 |
+| `openlama config list` | 설정 목록 |
+| `openlama config set <key> <value>` | 설정 변경 |
+| `openlama skill list` | 스킬 목록 |
+| `openlama skill create` | 스킬 생성 |
+| `openlama skill delete <name>` | 스킬 삭제 |
+| `openlama mcp list` | MCP 서버 목록 |
+| `openlama mcp add <name> <cmd> [args]` | MCP 서버 추가 |
+| `openlama mcp remove <name>` | MCP 서버 제거 |
+| `openlama cron list` | 예약 작업 목록 |
+| `openlama cron delete <id>` | 예약 작업 삭제 |
+| `openlama logs` | 데몬 로그 |
+| `openlama --version` | 버전 확인 |
+
+---
+
+## 추천 모델
+
+| 모델 | 크기 | 용도 |
+|------|------|------|
+| **`gemma4:e4b`** | **9.6 GB** | **종합 최고 — 기본 추천** |
+| `gemma3:4b` | 3.3 GB | 빠른 응답, 낮은 메모리 |
+| `qwen3.5:4b` | 3.4 GB | 다국어 지원 우수 |
+| `qwen3:8b` | 5.2 GB | 강한 추론 능력 |
+| `deepseek-r1:8b` | 5.2 GB | 코딩 작업 |
+| `gemma3:1b` | 0.8 GB | 초경량, 최소 하드웨어 |
+
+---
+
+## 시스템 요구 사항
+
+| 항목 | 최소 | 권장 |
+|------|------|------|
+| Python | 3.11+ | 3.13+ |
+| RAM | 4 GB | 8 GB+ |
+| 디스크 | 5 GB | 20 GB+ (모델 포함) |
+| OS | macOS / Linux / Windows | macOS (Apple Silicon) |
+| [Ollama](https://ollama.com) | 필수 | 최신 버전 |
+| [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | 선택 | 이미지 생성용 |
+
+---
+
+## 설정
+
+모든 설정은 SQLite에 저장됩니다 (`~/.config/openlama/openlama.db`).
+
+데이터 디렉토리 변경:
+
+```bash
+export OPENLAMA_DATA_DIR=/custom/path
+```
+
+주요 설정:
+
+| 키 | 기본값 | 설명 |
+|----|--------|------|
+| `telegram_bot_token` | — | 텔레그램 봇 API 토큰 |
+| `default_model` | — | 기본 Ollama 모델 |
+| `ollama_base` | `http://127.0.0.1:11434` | Ollama API URL |
+| `comfy_enabled` | `false` | ComfyUI 연동 활성화 |
+| `comfy_base` | `http://127.0.0.1:8184` | ComfyUI API URL |
+| `tool_sandbox_path` | `~/sandbox` | 코드 실행 샌드박스 |
+
+---
+
+## 기여하기
+
+기여를 환영합니다! 다음 순서로 진행해주세요:
+
+1. 저장소 Fork
+2. 기능 브랜치 생성 (`git checkout -b feature/amazing-feature`)
+3. 변경 사항 작성
+4. 테스트 실행 (`pytest`)
+5. 커밋 (`git commit -m 'feat: add amazing feature'`)
+6. 푸시 (`git push origin feature/amazing-feature`)
+7. Pull Request 생성
+
+### 개발 환경 설정
+
+```bash
+git clone https://github.com/your-username/openlama.git
+cd openlama
+uv venv && source .venv/bin/activate
+uv pip install -e ".[dev]"
+openlama setup
+```
+
+---
+
+## 로드맵
+
+- [ ] 웹 UI 채널
+- [ ] Discord 채널
+- [ ] 멀티유저 (분리된 컨텍스트)
+- [ ] RAG (로컬 문서 검색 증강 생성)
+- [ ] 음성 입출력
+- [ ] 플러그인 마켓플레이스
+
+---
+
+## 라이선스
+
+[MIT](../LICENSE)
+
+---
+
+<p align="center">
+  Ollama, python-telegram-bot, Rich, Click으로 제작.<br>
+  <sub>나의 AI, 나의 하드웨어, 나의 데이터.</sub>
+</p>
