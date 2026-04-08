@@ -13,7 +13,7 @@ from rich.console import Console
 from rich.panel import Panel
 from rich.progress import Progress
 
-from openlama.config import DATA_DIR, _DEFAULTS
+from openlama.config import DATA_DIR, TERMUX, IS_ANDROID, _DEFAULTS
 
 console = Console()
 
@@ -53,6 +53,9 @@ def run_setup():
     # Create all required directories
     _ensure_directories()
 
+    # Restart daemon if running so new config takes effect
+    _restart_daemon_if_running()
+
     console.print(Panel(
         "  [green]✅ Setup complete![/green]\n\n"
         "  Start:   [cyan]openlama start[/cyan]\n"
@@ -77,6 +80,20 @@ def _ensure_directories():
         d.mkdir(parents=True, exist_ok=True)
 
 
+def _restart_daemon_if_running():
+    """Restart daemon if it's currently running, so new config takes effect."""
+    try:
+        from openlama.daemon import _read_pid, restart_daemon
+        pid = _read_pid()
+        if pid:
+            console.print("\n  [cyan]⟳ Restarting daemon to apply new settings...[/cyan]")
+            restart_daemon()
+            console.print("  [green]✓ Daemon restarted[/green]")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Could not restart daemon: {e}[/yellow]")
+        console.print("  [dim]Run manually: openlama restart[/dim]")
+
+
 def _save(key: str, value: str):
     from openlama.database import init_db, set_setting
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -92,7 +109,7 @@ def _step_ollama():
         console.print("  ✓ Ollama is installed")
         # Check if server is running
         try:
-            r = httpx.get("http://127.0.0.1:11434/api/version", timeout=3)
+            r = httpx.get(f"{_get_ollama_url()}/api/version", timeout=3)
             if r.status_code == 200:
                 ver = r.json().get("version", "?")
                 console.print(f"  ✓ Ollama server running (v{ver})")
@@ -106,7 +123,7 @@ def _step_ollama():
         for _ in range(15):
             time.sleep(1)
             try:
-                r = httpx.get("http://127.0.0.1:11434/api/version", timeout=2)
+                r = httpx.get(f"{_get_ollama_url()}/api/version", timeout=2)
                 if r.status_code == 200:
                     console.print("  ✓ Ollama server started")
                     return

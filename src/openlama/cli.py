@@ -2,6 +2,20 @@
 import click
 from openlama import __version__
 
+def _restart_daemon_if_running_cli():
+    """Restart daemon if running, for config changes to take effect."""
+    try:
+        from openlama.daemon import _read_pid, restart_daemon
+        pid = _read_pid()
+        if pid:
+            click.echo("  ⟳ Restarting daemon to apply changes...")
+            restart_daemon()
+            click.echo("  ✓ Daemon restarted")
+    except Exception as e:
+        click.echo(f"  ⚠ Could not restart daemon: {e}")
+        click.echo("  Run manually: openlama restart")
+
+
 def _ver_tuple(v: str) -> tuple[int, ...]:
     """Parse version string to tuple for comparison. '0.1.28' → (0, 1, 28)"""
     try:
@@ -390,12 +404,14 @@ def config_set(key, value):
     init_db()
     set_setting(key, value)
     click.echo(f"✓ {key} = {value}")
+    _restart_daemon_if_running_cli()
 
 @config.command("reset")
 @click.confirmation_option(prompt="Reset all settings?")
 def config_reset():
     """Reset all settings to defaults."""
     click.echo("Settings reset. Run 'openlama setup' to reconfigure.")
+    _restart_daemon_if_running_cli()
 
 
 @config.command("stt")
@@ -538,6 +554,7 @@ def config_obsidian(args):
     if action == "disable":
         set_setting("obsidian_vault", "")
         click.echo("  ✓ Obsidian integration disabled")
+        _restart_daemon_if_running_cli()
         return
 
     if action == "vault":
@@ -551,6 +568,7 @@ def config_obsidian(args):
         click.echo(f"  ✓ Obsidian vault: {vault_name}")
         if not cli_installed:
             click.echo("  ⚠ obsidian-cli not installed. Run: openlama config obsidian install")
+        _restart_daemon_if_running_cli()
         return
 
     click.echo(f"  Unknown action: {action}. Use: status, install, vault <name>, disable")
