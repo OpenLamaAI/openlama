@@ -7,8 +7,10 @@ from pathlib import Path
 
 import pytest
 
-# Ensure project root is importable
-sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+# Ensure project root and src/openlama are importable
+_project_root = str(Path(__file__).resolve().parent.parent)
+sys.path.insert(0, _project_root)
+sys.path.insert(0, str(Path(_project_root) / "src"))
 
 # Set minimal env vars before any config import
 os.environ.setdefault("TELEGRAM_BOT_TOKEN", "test_token")

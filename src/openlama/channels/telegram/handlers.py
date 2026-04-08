@@ -131,6 +131,18 @@ def main_menu_keyboard(is_logged_in: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton("📊 Context", callback_data="cmd:context_status"),
         ],
         [
+            InlineKeyboardButton("🗜 Compress", callback_data="cmd:compress"),
+            InlineKeyboardButton("👤 Profile", callback_data="cmd:profile"),
+        ],
+        [
+            InlineKeyboardButton("📋 Skills", callback_data="cmd:skills"),
+            InlineKeyboardButton("🔌 MCP", callback_data="cmd:mcp"),
+        ],
+        [
+            InlineKeyboardButton("📅 Cron Tasks", callback_data="cmd:cron"),
+            InlineKeyboardButton("📤 Export Chat", callback_data="cmd:export"),
+        ],
+        [
             InlineKeyboardButton("📥 Install Model", callback_data="cmd:pull_prompt"),
             InlineKeyboardButton("🗂 Delete Model", callback_data="cmd:rm"),
         ],
@@ -139,11 +151,10 @@ def main_menu_keyboard(is_logged_in: bool = False) -> InlineKeyboardMarkup:
             InlineKeyboardButton("🎨 ComfyUI Mgmt", callback_data="cmd:comfyui"),
         ],
         [
-            InlineKeyboardButton("📋 Session Mgmt", callback_data="cmd:session"),
-            InlineKeyboardButton("📤 Export Chat", callback_data="cmd:export"),
+            InlineKeyboardButton("📋 Session", callback_data="cmd:session"),
+            InlineKeyboardButton("📖 Help", callback_data="cmd:help"),
         ],
         [
-            InlineKeyboardButton("📖 Help", callback_data="cmd:help"),
             InlineKeyboardButton("🔓 Logout", callback_data="cmd:logout"),
         ],
     ])
@@ -2114,6 +2125,83 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("comfyui:"):
         from openlama.channels.telegram.admin import handle_comfyui_callback
         await handle_comfyui_callback(q, uid, data)
+        return
+
+    # ── Compress ──
+    if data == "cmd:compress":
+        result_text = await compress_context(uid, user)
+        await q.edit_message_text(result_text, reply_markup=main_menu_keyboard(True))
+        return
+
+    # ── Profile ──
+    if data == "cmd:profile":
+        update_user(uid, state="setup_lang")
+        await q.edit_message_text(
+            "🌍 Select your language / 언어를 선택하세요:",
+            reply_markup=InlineKeyboardMarkup([
+                [InlineKeyboardButton("🇰🇷 한국어", callback_data="lang:ko")],
+                [InlineKeyboardButton("🇺🇸 English", callback_data="lang:en")],
+                [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang:ja")],
+            ]),
+        )
+        return
+
+    # ── Skills ──
+    if data == "cmd:skills":
+        from openlama.core.skills import list_skills
+        skills = list_skills()
+        if not skills:
+            text = "📋 <b>Skills</b>\n\nNo skills installed.\nCreate via chat or CLI: <code>openlama skill create</code>"
+        else:
+            lines = ["📋 <b>Installed Skills</b>\n"]
+            for s in skills:
+                lines.append(f"• <b>{s['name']}</b> — {s.get('description', '')[:50]}")
+                triggers = s.get("trigger", "")[:40]
+                if triggers:
+                    lines.append(f"  triggers: <i>{triggers}</i>")
+            text = "\n".join(lines)
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu")],
+        ]))
+        return
+
+    # ── MCP ──
+    if data == "cmd:mcp":
+        try:
+            from openlama.core.mcp_client import load_mcp_config
+            config = load_mcp_config()
+            servers = config.get("mcpServers", {})
+        except Exception:
+            servers = {}
+        if not servers:
+            text = "🔌 <b>MCP Servers</b>\n\nNo servers configured.\nAdd via CLI: <code>openlama mcp add &lt;name&gt; &lt;cmd&gt;</code>"
+        else:
+            lines = ["🔌 <b>MCP Servers</b>\n"]
+            for name, cfg in servers.items():
+                cmd = cfg.get("command", "?")
+                args_str = " ".join(cfg.get("args", []))[:40]
+                lines.append(f"• <b>{name}</b>: {cmd} {args_str}")
+            text = "\n".join(lines)
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu")],
+        ]))
+        return
+
+    # ── Cron ──
+    if data == "cmd:cron":
+        from openlama.database import list_cron_jobs
+        jobs = list_cron_jobs()
+        if not jobs:
+            text = "📅 <b>Scheduled Tasks</b>\n\nNo tasks registered.\nCreate via chat: <i>\"매일 9시에 뉴스 요약해줘\"</i>"
+        else:
+            lines = ["📅 <b>Scheduled Tasks</b>\n"]
+            for j in jobs:
+                status = "✅" if j.get("enabled", True) else "⏸"
+                lines.append(f"{status} #{j['id']}: <code>{j['cron_expr']}</code> — {j['task'][:50]}")
+            text = "\n".join(lines)
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu")],
+        ]))
         return
 
     # ── Session management ──

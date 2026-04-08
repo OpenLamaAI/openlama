@@ -7,8 +7,8 @@ from pathlib import Path
 
 import pytest
 
-from tools import init_tools, get_all_tools, execute_tool, format_tools_for_ollama
-from tools.registry import get_tool
+from openlama.tools import init_tools, get_all_tools, execute_tool, format_tools_for_ollama
+from openlama.tools.registry import get_tool
 
 
 @pytest.fixture(autouse=True, scope="module")
@@ -137,7 +137,7 @@ async def test_shell_timeout():
     config.CODE_EXECUTION_TIMEOUT = 1
     result = await execute_tool("shell_command", {"command": "sleep 30"}, 0)
     config.CODE_EXECUTION_TIMEOUT = old
-    assert "timeout" in result.lower() or "exit code" in result or "시간 초과" in result
+    assert "timed out" in result.lower() or "timeout" in result.lower() or "exit code" in result or "시간 초과" in result
 
 
 # ── file_read ──
