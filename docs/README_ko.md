@@ -155,17 +155,20 @@ You: 서울 날씨 알려줘
     /help             명령어 목록
     /clear            대화 컨텍스트 초기화
     /status           세션 및 컨텍스트 정보
+    /compress         대화 컨텍스트 압축
+    /session          세션 조회/연장
     /export           대화 내보내기
     /profile          프로필 재설정
     /quit             채팅 종료
 
   Model
     /model            현재 모델 변경
-    /models           사용 가능한 모델 목록
+    /models           사용 가능한 모델 목록 (기능 뱃지)
     /pull             새 모델 다운로드
+    /rm               모델 삭제
 
   Settings
-    /settings         모델 파라미터 보기/수정
+    /settings         인터랙티브 모델 설정
     /set <p> <v>      파라미터 변경
     /think            추론 모드 토글
     /systemprompt     프롬프트 파일 보기/편집
@@ -191,13 +194,14 @@ You: 서울 날씨 알려줘
 
 - 설정, 모델 선택을 위한 인라인 키보드 메뉴
 - 실시간 스트리밍 응답
-- 이미지/문서/오디오 분석
-- 토큰 사용량 표시 컨텍스트 바
+- 이미지/문서/오디오/비디오/ZIP 파일 분석
+- 음성 메시지 텍스트 변환 (STT, faster-whisper)
+- 토큰 사용량 표시 (Ollama 실제 토큰)
 - 인라인 버튼으로 프롬프트 파일 편집
 
 ---
 
-## 내장 도구 (18개)
+## 내장 도구 (20+개)
 
 | 도구 | 설명 |
 |------|------|
@@ -210,13 +214,16 @@ You: 서울 날씨 알려줘
 | `file_write` | 파일 쓰기 / 추가 |
 | `git` | Git 작업 (status, log, diff, commit) |
 | `process_manager` | 프로세스 관리, 시스템 상태 |
+| `tmux` | tmux 터미널 멀티플렉서 제어 |
 | `image_generate` | ComfyUI 텍스트→이미지 |
 | `image_edit` | ComfyUI 이미지 편집 |
 | `memory` | 장기 기억 저장/검색/삭제 |
-| `skill_creator` | 커스텀 스킬 생성/관리 |
+| `skill_creator` | 커스텀 스킬 생성/관리/설치 |
 | `mcp_manager` | MCP 서버 설치/관리 |
 | `cron_manager` | 예약 작업 등록/관리 |
 | `get_datetime` | 현재 날짜/시간 |
+| `self_update` | openlama 업데이트 확인/설치 |
+| `whisper` | 오디오/음성 텍스트 변환 (STT, 선택) |
 | `obsidian_tool` | 옵시디언 노트 읽기/쓰기 (선택) |
 
 AI는 어떤 언어로 요청해도 도구를 사용합니다:
@@ -224,6 +231,8 @@ AI는 어떤 언어로 요청해도 도구를 사용합니다:
 > "서버 상태 확인해줘" → `shell_command`
 > "search for latest AI news" → `web_search`
 > "매일 10시에 뉴스 요약해줘" → `cron_manager`
+> "tmux 세션 열어줘" → `tmux`
+> "봇 업데이트해줘" → `self_update`
 
 ---
 
@@ -350,8 +359,12 @@ openlama cron delete 1   # 작업 삭제
 | `openlama mcp list` | MCP 서버 목록 |
 | `openlama mcp add <name> <cmd> [args]` | MCP 서버 추가 |
 | `openlama mcp remove <name>` | MCP 서버 제거 |
+| `openlama tool list` | 등록된 도구 목록 |
 | `openlama cron list` | 예약 작업 목록 |
 | `openlama cron delete <id>` | 예약 작업 삭제 |
+| `openlama config stt` | 음성인식(STT) 상태 확인 |
+| `openlama config stt install` | faster-whisper 설치 |
+| `openlama config stt enable/disable` | STT 활성화/비활성화 |
 | `openlama logs` | 데몬 로그 |
 | `openlama --version` | 버전 확인 |
 

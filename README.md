@@ -159,17 +159,20 @@ Type `/` to see all available commands:
     /help             Show available commands
     /clear            Clear conversation context
     /status           Show session and context info
+    /compress         Compress conversation context
+    /session          View/extend session
     /export           Export conversation history
     /profile          Redo profile setup
     /quit             Exit chat
 
   Model
     /model            Show or change current model
-    /models           List available models
+    /models           List available models (with capabilities)
     /pull             Download a new model
+    /rm               Delete a model
 
   Settings
-    /settings         View and modify model parameters
+    /settings         Interactive model settings
     /set <p> <v>      Change a parameter
     /think            Toggle think/reasoning mode
     /systemprompt     View/edit prompt files
@@ -195,13 +198,14 @@ After `openlama start`, open your bot in Telegram:
 
 - Inline keyboard menus for settings, model selection
 - Streaming responses with real-time edits
-- Image/document/audio analysis
-- Context bar showing token usage
+- Image/document/audio/video/ZIP analysis
+- Voice message transcription (STT via faster-whisper)
+- Context bar showing token usage (Ollama actual tokens)
 - Prompt file editor via inline buttons
 
 ---
 
-## Built-in Tools (18)
+## Built-in Tools (20+)
 
 | Tool | Description |
 |------|-------------|
@@ -214,13 +218,16 @@ After `openlama start`, open your bot in Telegram:
 | `file_write` | Write or append to files |
 | `git` | Git operations (status, log, diff, commit) |
 | `process_manager` | List/kill processes, system status |
+| `tmux` | Full tmux terminal multiplexer control |
 | `image_generate` | Text-to-image via ComfyUI |
 | `image_edit` | Image editing via ComfyUI |
 | `memory` | Long-term memory save/search/delete |
-| `skill_creator` | Create/manage custom skills |
+| `skill_creator` | Create/manage/install custom skills |
 | `mcp_manager` | Install/manage MCP tool servers |
 | `cron_manager` | Schedule recurring AI tasks |
 | `get_datetime` | Current date and time |
+| `self_update` | Check and install openlama updates |
+| `whisper` | Audio/voice transcription (STT, optional) |
 | `obsidian_tool` | Obsidian vault read/write (optional) |
 
 The AI understands tool requests in any language:
@@ -228,6 +235,8 @@ The AI understands tool requests in any language:
 > "서버 상태 확인해줘" → `shell_command`
 > "search for latest AI news" → `web_search`
 > "매일 10시에 뉴스 요약해줘" → `cron_manager`
+> "tmux 세션 열어줘" → `tmux`
+> "봇 업데이트해줘" → `self_update`
 
 ---
 
@@ -367,8 +376,12 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | `openlama mcp list` | List MCP servers |
 | `openlama mcp add <name> <cmd> [args]` | Add an MCP server |
 | `openlama mcp remove <name>` | Remove an MCP server |
+| `openlama tool list` | List all registered tools |
 | `openlama cron list` | List scheduled tasks |
 | `openlama cron delete <id>` | Delete a scheduled task |
+| `openlama config stt` | Show STT status |
+| `openlama config stt install` | Install faster-whisper for voice recognition |
+| `openlama config stt enable/disable` | Enable/disable STT |
 | `openlama logs` | View daemon logs |
 | `openlama --version` | Show version |
 
