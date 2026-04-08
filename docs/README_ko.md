@@ -29,13 +29,15 @@
 
 - **100% 로컬** — 클라우드 API 없음. 모든 처리가 내 하드웨어에서 실행.
 - **듀얼 채널** — 텔레그램 봇 + 터미널 TUI. 대화 컨텍스트 공유.
-- **18개 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git 등.
+- **20개 이상 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git, Obsidian 등.
 - **커스텀 스킬** — 키워드에 자동 트리거되는 재사용 가능한 지침 세트.
 - **MCP 지원** — [Model Context Protocol](https://modelcontextprotocol.io)로 외부 도구 서버 연결.
 - **예약 작업** — 크론 기반 반복 작업을 AI가 실행.
+- **메모리 시스템** — 2계층 구조: 장기 기억 (MEMORY.md) + 일별 에피소드 기억 (자동 저장).
 - **멀티 프롬프트** — SOUL, USERS, MEMORY, SYSTEM 프롬프트를 분리하여 세밀하게 제어.
 - **자동 업데이트** — `openlama update`로 openlama와 Ollama 동시 업데이트.
-- **크로스 플랫폼** — macOS, Linux, Windows.
+- **크로스 플랫폼** — macOS, Linux, Windows, **Android (Termux)**.
+- **모바일 디바이스 제어** — Android에서 카메라, 문자, 위치, 센서 등을 Termux:API로 제어.
 - **자가 복구** — `openlama doctor fix`로 문제 자동 진단 및 수리.
 
 ---
@@ -61,26 +63,35 @@ openlama setup
 대화형 마법사가 진행됩니다:
 
 ```
-  ● Step 1/5 — Ollama
+  ● Step 1/7 — Ollama
   ✓ Ollama is installed
   ✓ Ollama server running (v0.20.3)
 
-  ● Step 2/5 — Models
+  ● Step 2/7 — Models
   ? Select models to download:
     ✓ gemma4:e4b       9.6 GB  [recommended]
       qwen3:8b         5.2 GB  [light]
+      deepseek-r1:8b   5.2 GB  [coding]
+    ✓ gemma4:e2b                [installed]
 
   gemma4:e4b (pulling manifest)  ━━━━━━━━━━━━━━  4.2/9.6 GB  52.3 MB/s  0:01:43
 
-  ● Step 3/5 — Channel
+  ● Step 3/7 — Channel
   ? Enter Telegram bot token (@BotFather): 1234567890:ABC...
   ✓ Connected: @your_bot_name
 
-  ● Step 4/5 — Password
+  ● Step 4/7 — Password
   ? Set admin password: ********
 
-  ● Step 5/5 — Features
+  ● Step 5/7 — Features
   ✓ ComfyUI detected: macOS Desktop App
+
+  ● Step 6/7 — Voice Recognition (STT)
+  ✓ faster-whisper is installed
+
+  ● Step 7/7 — Obsidian Notes
+  ✓ obsidian-cli is installed
+  ✓ Vault connected: 13 items found
 
   ╭─────────────────────────────────────────────╮
   │  ✅ Setup complete!                          │
@@ -115,7 +126,7 @@ openlama doctor
   ✓  Boot service           systemd user service registered
   ✓  Ollama server          Connected (http://127.0.0.1:11434)
   ✓  Ollama version         v0.20.3 (latest)
-  ✓  Ollama models          3 models available
+  ✓  Ollama models          gemma4:e4b, gemma4:e2b
 
   17 passed · 1 warning(s)
 ```
@@ -217,22 +228,135 @@ You: 서울 날씨 알려줘
 | `tmux` | tmux 터미널 멀티플렉서 제어 |
 | `image_generate` | ComfyUI 텍스트→이미지 |
 | `image_edit` | ComfyUI 이미지 편집 |
-| `memory` | 장기 기억 저장/검색/삭제 |
+| `memory` | 2계층 기억: 장기 기억 + 일별 에피소드 |
 | `skill_creator` | 커스텀 스킬 생성/관리/설치 |
 | `mcp_manager` | MCP 서버 설치/관리 |
 | `cron_manager` | 예약 작업 등록/관리 |
 | `get_datetime` | 현재 날짜/시간 |
 | `self_update` | openlama 업데이트 확인/설치 |
 | `whisper` | 오디오/음성 텍스트 변환 (STT, 선택) |
-| `obsidian_tool` | 옵시디언 노트 읽기/쓰기 (선택) |
+| `obsidian` | 옵시디언 노트 읽기/쓰기/검색 (선택) |
+| `termux_device` | Android 디바이스 제어 — Termux:API (Android 전용) |
 
 AI는 어떤 언어로 요청해도 도구를 사용합니다:
 
 > "서버 상태 확인해줘" → `shell_command`
 > "search for latest AI news" → `web_search`
 > "매일 10시에 뉴스 요약해줘" → `cron_manager`
-> "tmux 세션 열어줘" → `tmux`
-> "봇 업데이트해줘" → `self_update`
+> "노트 목록 보여줘" → `obsidian`
+> "배터리 확인해줘" → `termux_device` (Android)
+
+---
+
+## Android (Termux) 설치 가이드
+
+openlama는 [Termux](https://f-droid.org/packages/com.termux/)를 통해 Android에서 실행됩니다. 두 가지 모드를 지원합니다.
+
+### 모드 1: 원격 추론 (권장)
+
+봇은 휴대폰에서 실행하고, 추론은 데스크톱/서버의 GPU에서 처리합니다.
+
+#### 사전 준비
+
+- [Termux](https://f-droid.org/packages/com.termux/) — **F-Droid**에서 설치 (Play Store 버전은 지원 안 됨)
+- [Termux:API](https://f-droid.org/packages/com.termux.api/) — 디바이스 제어용 (카메라, 문자, 센서)
+- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — 부팅 시 자동 시작 (선택)
+- Ollama가 실행 중인 데스크톱/서버 (네트워크 접근 가능)
+
+#### 설치 과정
+
+```bash
+# 1. Termux 패키지 업데이트
+pkg update && pkg upgrade -y
+
+# 2. Python 및 Termux:API 브릿지 설치
+pkg install python termux-api -y
+
+# 3. openlama 설치
+pip install openlama
+
+# 4. 초기 설정 마법사 실행
+openlama setup
+#   Step 1: "Remote" 선택 → 서버 URL 입력 (예: http://192.168.1.100:11434)
+#   Step 2: 원격 서버의 모델 선택
+#   Step 3: 텔레그램 봇 토큰 입력
+#   Step 4: 비밀번호 설정
+
+# 5. 봇 시작
+openlama start -d
+
+# 6. (선택) 부팅 시 자동 시작 등록
+openlama start --install-service
+```
+
+> **참고:** 원격 Ollama 서버에서 `OLLAMA_HOST=0.0.0.0 ollama serve`로 실행해야 네트워크 연결을 받을 수 있습니다.
+
+### 모드 2: 온디바이스 추론
+
+모든 것을 휴대폰에서 실행합니다 (RAM 8GB 이상 권장).
+
+```bash
+# Termux User Repository를 통해 Ollama 설치
+pkg install tur-repo -y
+pkg install ollama python termux-api -y
+
+# openlama 설치 및 설정
+pip install openlama
+openlama setup    # "Local" 선택 → 모델 다운로드 (~3-7 GB)
+
+openlama start -d
+```
+
+### Android 디바이스 제어
+
+Android에서 실행 시, `termux_device` 도구로 AI가 휴대폰을 제어할 수 있습니다:
+
+| 카테고리 | 기능 |
+|----------|------|
+| **전화** | call, sms_send, sms_list, call_log, contacts |
+| **카메라** | camera_photo (전면/후면), camera_info |
+| **오디오** | mic_record, media_play, tts_speak, volume_get/set |
+| **센서** | location, battery, sensor_list/read |
+| **시스템** | brightness, torch, clipboard, wifi_info/scan |
+| **알림** | notification, toast, vibrate |
+| **앱** | app_launch, app_list, share, download |
+
+안전 규칙이 적용됩니다:
+- 전화 및 문자는 **반드시 사용자 확인 후** 실행
+- 위치 정보는 **동의 없이 절대 공유하지 않음**
+
+### 모바일 추천 모델
+
+| 모델 | 크기 | 비고 |
+|------|------|------|
+| **`gemma4:e2b`** | **7.2 GB** | **모바일 최적** — 2.3B 유효 파라미터 |
+| `gemma3:4b` | 3.3 GB | 균형 잡힌 성능 |
+| `phi4-mini` | 2.5 GB | 경량 |
+| `gemma3:1b` | 0.8 GB | 초경량, 최소 하드웨어 |
+
+### 배터리 최적화
+
+- openlama는 Android가 프로세스를 종료하지 않도록 **wake lock**을 자동 획득합니다
+- Termux의 배터리 최적화를 비활성화하세요:
+  - Samsung: 설정 → 배터리 → 앱 절전 관리 → Termux → 최적화 안 함
+  - Xiaomi: 설정 → 배터리 → 앱 배터리 절약 → Termux → 제한 없음
+  - 기타: 설정 → 앱 → Termux → 배터리 → 제한 없음
+
+---
+
+## 메모리 시스템
+
+openlama는 2계층 메모리 아키텍처를 사용합니다:
+
+### 장기 기억 (MEMORY.md)
+- 중요한 사실, 사용자 선호, 핵심 결정 사항을 저장합니다.
+- `memory` 도구로 관리 (save/list/search/delete).
+- 키워드 검색으로 접근 — 로컬 LLM의 컨텍스트를 절약하기 위해 **시스템 프롬프트에 로드되지 않습니다**.
+
+### 일별 에피소드 기억 (memories/YYYY-MM-DD.md)
+- 컨텍스트 압축, 대화 초기화, 일일 플러시 시 자동 저장됩니다.
+- `memory` 도구로 날짜와 키워드로 검색 (list_dates/read_daily/search_daily).
+- AI가 과거 대화를 회상할 수 있습니다: _"어제 뭐 얘기했지?"_
 
 ---
 
@@ -306,7 +430,7 @@ openlama cron delete 1   # 작업 삭제
 | `SYSTEM.md` | 도구, 규칙, 스킬 목록 | 매 요청 시 자동 생성 |
 | `SOUL.md` | 에이전트 정체성과 성격 | `/systemprompt`로 편집 |
 | `USERS.md` | 사용자 프로필과 언어 | `/systemprompt`로 편집 |
-| `MEMORY.md` | 장기 기억 항목 | `memory` 도구로 관리 |
+| `MEMORY.md` | 장기 기억 항목 | `memory` 도구로 관리 (프롬프트에 비포함) |
 
 모든 파일은 `~/.config/openlama/prompts/`에 있으며:
 - **텔레그램**: `/systemprompt` → 파일 선택 → 내용 확인 → 수정 후 전송
@@ -326,7 +450,9 @@ openlama cron delete 1   # 작업 삭제
 │   ├── SYSTEM.md            # 자동 생성 시스템 프롬프트
 │   ├── SOUL.md              # 에이전트 정체성
 │   ├── USERS.md             # 사용자 프로필
-│   └── MEMORY.md            # 장기 기억
+│   └── MEMORY.md            # 장기 기억 (도구로만 접근)
+├── memories/
+│   └── YYYY-MM-DD.md        # 일별 에피소드 기억
 ├── skills/
 │   └── <이름>/SKILL.md       # 커스텀 스킬
 └── workflows/
@@ -344,15 +470,25 @@ openlama cron delete 1   # 작업 삭제
 | `openlama start` | 텔레그램 봇 실행 (포그라운드) |
 | `openlama start -d` | 백그라운드 데몬 실행 |
 | `openlama start --install-service` | OS 서비스 등록 (부팅 시 자동 시작) |
+| `openlama start --uninstall-service` | OS 서비스 해제 |
 | `openlama stop` | 데몬 중지 |
 | `openlama restart` | 데몬 재시작 |
 | `openlama chat` | 터미널 채팅 TUI |
 | `openlama status` | 연결 및 프로세스 상태 |
-| `openlama doctor` | 진단 실행 (18개 항목) |
+| `openlama doctor` | 진단 실행 |
 | `openlama doctor fix` | 자동 수정 |
 | `openlama update` | openlama + Ollama 업데이트 |
 | `openlama config list` | 설정 목록 |
-| `openlama config set <key> <value>` | 설정 변경 |
+| `openlama config get <key>` | 설정 값 조회 |
+| `openlama config set <key> <value>` | 설정 변경 (데몬 자동 재시작) |
+| `openlama config reset` | 설정 초기화 |
+| `openlama config stt` | 음성인식(STT) 상태 확인 |
+| `openlama config stt install` | faster-whisper 설치 |
+| `openlama config stt enable/disable` | STT 활성화/비활성화 |
+| `openlama config obsidian` | 옵시디언 연동 상태 확인 |
+| `openlama config obsidian install` | obsidian-cli 설치 |
+| `openlama config obsidian vault <name>` | 옵시디언 볼트 설정 |
+| `openlama config obsidian disable` | 옵시디언 연동 비활성화 |
 | `openlama skill list` | 스킬 목록 |
 | `openlama skill create` | 스킬 생성 |
 | `openlama skill delete <name>` | 스킬 삭제 |
@@ -362,15 +498,14 @@ openlama cron delete 1   # 작업 삭제
 | `openlama tool list` | 등록된 도구 목록 |
 | `openlama cron list` | 예약 작업 목록 |
 | `openlama cron delete <id>` | 예약 작업 삭제 |
-| `openlama config stt` | 음성인식(STT) 상태 확인 |
-| `openlama config stt install` | faster-whisper 설치 |
-| `openlama config stt enable/disable` | STT 활성화/비활성화 |
 | `openlama logs` | 데몬 로그 |
 | `openlama --version` | 버전 확인 |
 
 ---
 
 ## 추천 모델
+
+### 데스크톱 / 서버
 
 | 모델 | 크기 | 용도 |
 |------|------|------|
@@ -381,9 +516,20 @@ openlama cron delete 1   # 작업 삭제
 | `deepseek-r1:8b` | 5.2 GB | 코딩 작업 |
 | `gemma3:1b` | 0.8 GB | 초경량, 최소 하드웨어 |
 
+### 모바일 (Android)
+
+| 모델 | 크기 | 용도 |
+|------|------|------|
+| **`gemma4:e2b`** | **7.2 GB** | **모바일 최적 — 2.3B 유효 파라미터** |
+| `gemma3:4b` | 3.3 GB | 균형 잡힌 성능 |
+| `phi4-mini` | 2.5 GB | 경량 |
+| `gemma3:1b` | 0.8 GB | 초경량, 1GB RAM 디바이스 |
+
 ---
 
 ## 시스템 요구 사항
+
+### 데스크톱 / 서버
 
 | 항목 | 최소 | 권장 |
 |------|------|------|
@@ -393,6 +539,17 @@ openlama cron delete 1   # 작업 삭제
 | OS | macOS / Linux / Windows | macOS (Apple Silicon) |
 | [Ollama](https://ollama.com) | 필수 | 최신 버전 |
 | [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | 선택 | 이미지 생성용 |
+
+### Android (Termux)
+
+| 항목 | 최소 | 권장 |
+|------|------|------|
+| Android | 10+ | 12+ |
+| RAM | 4 GB (원격 모드) | 8 GB+ (온디바이스) |
+| 디스크 | 500 MB (원격) | 8 GB+ (온디바이스) |
+| [Termux](https://f-droid.org/packages/com.termux/) | 필수 | F-Droid에서 설치 |
+| [Termux:API](https://f-droid.org/packages/com.termux.api/) | 권장 | 디바이스 제어용 |
+| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | 선택 | 자동 시작용 |
 
 ---
 
@@ -416,6 +573,8 @@ export OPENLAMA_DATA_DIR=/custom/path
 | `comfy_enabled` | `false` | ComfyUI 연동 활성화 |
 | `comfy_base` | `http://127.0.0.1:8184` | ComfyUI API URL |
 | `tool_sandbox_path` | `~/sandbox` | 코드 실행 샌드박스 |
+| `obsidian_vault` | — | 옵시디언 볼트 이름 (설정 시 도구 활성화) |
+| `stt_enabled` | `auto` | 음성 인식: `true`/`false`/`auto` |
 
 ---
 
@@ -434,7 +593,7 @@ export OPENLAMA_DATA_DIR=/custom/path
 ### 개발 환경 설정
 
 ```bash
-git clone https://github.com/your-username/openlama.git
+git clone https://github.com/sussa3007/openlama.git
 cd openlama
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
@@ -447,6 +606,7 @@ openlama setup
 
 - [ ] 웹 UI 채널
 - [ ] Discord 채널
+- [ ] iOS Shortcuts 연동
 - [ ] 멀티유저 (분리된 컨텍스트)
 - [ ] RAG (로컬 문서 검색 증강 생성)
 - [ ] 음성 입출력

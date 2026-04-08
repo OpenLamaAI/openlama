@@ -29,13 +29,15 @@ Optimized for [Gemma 4](https://blog.google/innovation-and-ai/technology/develop
 
 - **100% Local** — No cloud APIs. All processing on your hardware.
 - **Dual Channel** — Telegram bot + terminal TUI with shared conversation context.
-- **18 Built-in Tools** — Web search, code execution, file I/O, image generation, Git, and more.
+- **20+ Built-in Tools** — Web search, code execution, file I/O, image generation, Git, Obsidian, and more.
 - **Custom Skills** — Create reusable instruction sets triggered by keywords.
 - **MCP Support** — Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io).
 - **Scheduled Tasks** — Cron-based recurring tasks executed by AI.
+- **Memory System** — Two-tier memory: long-term (MEMORY.md) + episodic daily (auto-saved digests).
 - **Multi-prompt System** — SOUL, USERS, MEMORY, SYSTEM prompts for fine-grained personality control.
 - **Auto-update** — `openlama update` upgrades both openlama and Ollama.
-- **Cross-platform** — macOS, Linux, Windows.
+- **Cross-platform** — macOS, Linux, Windows, **Android (Termux)**.
+- **Mobile Device Control** — On Android, control your phone: camera, SMS, location, sensors, and more via Termux:API.
 - **Self-healing** — `openlama doctor fix` auto-diagnoses and repairs issues.
 
 ---
@@ -61,27 +63,35 @@ openlama setup
 The interactive wizard will:
 
 ```
-  ● Step 1/5 — Ollama
+  ● Step 1/7 — Ollama
   ✓ Ollama is installed
   ✓ Ollama server running (v0.20.3)
 
-  ● Step 2/5 — Models
+  ● Step 2/7 — Models
   ? Select models to download:
     ✓ gemma4:e4b       9.6 GB  [recommended]
       qwen3:8b         5.2 GB  [light]
       deepseek-r1:8b   5.2 GB  [coding]
+    ✓ gemma4:e2b                [installed]
 
   gemma4:e4b (pulling manifest)  ━━━━━━━━━━━━━━  4.2/9.6 GB  52.3 MB/s  0:01:43
 
-  ● Step 3/5 — Channel
+  ● Step 3/7 — Channel
   ? Enter Telegram bot token (@BotFather): 1234567890:ABC...
   ✓ Connected: @your_bot_name
 
-  ● Step 4/5 — Password
+  ● Step 4/7 — Password
   ? Set admin password: ********
 
-  ● Step 5/5 — Features
+  ● Step 5/7 — Features
   ✓ ComfyUI detected: macOS Desktop App
+
+  ● Step 6/7 — Voice Recognition (STT)
+  ✓ faster-whisper is installed
+
+  ● Step 7/7 — Obsidian Notes
+  ✓ obsidian-cli is installed
+  ✓ Vault connected: 13 items found
 
   ╭─────────────────────────────────────────────╮
   │  ✅ Setup complete!                          │
@@ -118,7 +128,7 @@ openlama doctor
   ✓  Telegram connection    Bot @your_bot is reachable
   ✓  Ollama server          Connected (http://127.0.0.1:11434)
   ✓  Ollama version         v0.20.3 (latest)
-  ✓  Ollama models          3 models available
+  ✓  Ollama models          gemma4:e4b, gemma4:e2b
   !  ComfyUI                Not running (auto-start configured)
 
   17 passed · 1 warning(s)
@@ -221,22 +231,135 @@ After `openlama start`, open your bot in Telegram:
 | `tmux` | Full tmux terminal multiplexer control |
 | `image_generate` | Text-to-image via ComfyUI |
 | `image_edit` | Image editing via ComfyUI |
-| `memory` | Long-term memory save/search/delete |
+| `memory` | Two-tier memory: long-term + daily episodic |
 | `skill_creator` | Create/manage/install custom skills |
 | `mcp_manager` | Install/manage MCP tool servers |
 | `cron_manager` | Schedule recurring AI tasks |
 | `get_datetime` | Current date and time |
 | `self_update` | Check and install openlama updates |
 | `whisper` | Audio/voice transcription (STT, optional) |
-| `obsidian_tool` | Obsidian vault read/write (optional) |
+| `obsidian` | Obsidian vault read/write/search (optional) |
+| `termux_device` | Android device control via Termux:API (Android only) |
 
 The AI understands tool requests in any language:
 
 > "서버 상태 확인해줘" → `shell_command`
 > "search for latest AI news" → `web_search`
 > "매일 10시에 뉴스 요약해줘" → `cron_manager`
-> "tmux 세션 열어줘" → `tmux`
-> "봇 업데이트해줘" → `self_update`
+> "노트 목록 보여줘" → `obsidian`
+> "배터리 확인해줘" → `termux_device` (Android)
+
+---
+
+## Android (Termux) Setup
+
+openlama runs on Android via [Termux](https://f-droid.org/packages/com.termux/). Two modes are supported:
+
+### Mode 1: Remote Inference (Recommended)
+
+Run the bot on your phone, inference on a desktop/server with a GPU.
+
+#### Prerequisites
+
+- [Termux](https://f-droid.org/packages/com.termux/) — Install from **F-Droid** (not Play Store)
+- [Termux:API](https://f-droid.org/packages/com.termux.api/) — For device control (camera, SMS, sensors)
+- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — For auto-start on boot (optional)
+- A desktop/server running Ollama (accessible on the network)
+
+#### Installation
+
+```bash
+# 1. Update Termux packages
+pkg update && pkg upgrade -y
+
+# 2. Install Python and Termux:API bridge
+pkg install python termux-api -y
+
+# 3. Install openlama
+pip install openlama
+
+# 4. Run setup wizard
+openlama setup
+#   Step 1: Select "Remote" → enter server URL (e.g., http://192.168.1.100:11434)
+#   Step 2: Select model from remote server
+#   Step 3: Enter Telegram bot token
+#   Step 4: Set password
+
+# 5. Start the bot
+openlama start -d
+
+# 6. (Optional) Auto-start on boot
+openlama start --install-service
+```
+
+> **Note:** On the remote Ollama server, start with `OLLAMA_HOST=0.0.0.0 ollama serve` to accept network connections.
+
+### Mode 2: On-Device Inference
+
+Run everything on the phone (requires 8GB+ RAM).
+
+```bash
+# Install Ollama via Termux User Repository
+pkg install tur-repo -y
+pkg install ollama python termux-api -y
+
+# Install openlama and run setup
+pip install openlama
+openlama setup    # Select "Local" → downloads a model (~3-7 GB)
+
+openlama start -d
+```
+
+### Android Device Control
+
+When running on Android, the `termux_device` tool gives the AI control over your phone:
+
+| Category | Actions |
+|----------|---------|
+| **Phone** | call, sms_send, sms_list, call_log, contacts |
+| **Camera** | camera_photo (front/rear), camera_info |
+| **Audio** | mic_record, media_play, tts_speak, volume_get/set |
+| **Sensors** | location, battery, sensor_list/read |
+| **System** | brightness, torch, clipboard, wifi_info/scan |
+| **Notifications** | notification, toast, vibrate |
+| **Apps** | app_launch, app_list, share, download |
+
+Safety rules are enforced:
+- Phone calls and SMS **require explicit user confirmation**
+- Location data is **never shared without consent**
+
+### Mobile Recommended Models
+
+| Model | Size | Notes |
+|-------|------|-------|
+| **`gemma4:e2b`** | **7.2 GB** | **Best for mobile** — 2.3B effective params |
+| `gemma3:4b` | 3.3 GB | Good balance |
+| `phi4-mini` | 2.5 GB | Lightweight |
+| `gemma3:1b` | 0.8 GB | Ultra-light, minimal hardware |
+
+### Battery Optimization
+
+- openlama acquires a **wake lock** automatically to prevent Android from killing the process
+- Disable battery optimization for Termux in your phone settings:
+  - Samsung: Settings → Battery → App power management → Termux → Don't optimize
+  - Xiaomi: Settings → Battery → App battery saver → Termux → No restrictions
+  - Other: Settings → Apps → Termux → Battery → Unrestricted
+
+---
+
+## Memory System
+
+openlama uses a two-tier memory architecture:
+
+### Long-term Memory (MEMORY.md)
+- Stores important facts, user preferences, key decisions.
+- Managed via the `memory` tool (save/list/search/delete).
+- Accessed by keyword search — **not loaded into system prompt** to save context for local LLMs.
+
+### Episodic Daily Memory (memories/YYYY-MM-DD.md)
+- Auto-saved conversation digests on context compression, clear, and daily flush.
+- Searchable by date and keyword via the `memory` tool (list_dates/read_daily/search_daily).
+- Enables the AI to recall past conversations: _"What did we talk about yesterday?"_
 
 ---
 
@@ -321,7 +444,7 @@ openlama uses a multi-file prompt architecture:
 | `SYSTEM.md` | Tools, rules, skills list | Auto-generated each request |
 | `SOUL.md` | Agent identity and personality | Yes — `/systemprompt` |
 | `USERS.md` | User profile and language | Yes — `/systemprompt` |
-| `MEMORY.md` | Long-term memory entries | Yes — via `memory` tool |
+| `MEMORY.md` | Long-term memory entries | Via `memory` tool (not in prompt) |
 
 All files are in `~/.config/openlama/prompts/` and can be edited via:
 - **Telegram**: `/systemprompt` → select file → edit → send back
@@ -341,7 +464,9 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 │   ├── SYSTEM.md            # Auto-generated system prompt
 │   ├── SOUL.md              # Agent identity
 │   ├── USERS.md             # User profile
-│   └── MEMORY.md            # Long-term memory
+│   └── MEMORY.md            # Long-term memory (tool-accessed only)
+├── memories/
+│   └── YYYY-MM-DD.md        # Episodic daily memory
 ├── skills/
 │   └── <name>/SKILL.md      # Custom skills
 └── workflows/
@@ -364,12 +489,20 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | `openlama restart` | Restart daemon |
 | `openlama chat` | Terminal chat TUI |
 | `openlama status` | Connection and process status |
-| `openlama doctor` | Run 18 diagnostic checks |
+| `openlama doctor` | Run diagnostic checks |
 | `openlama doctor fix` | Auto-fix detected issues |
 | `openlama update` | Update openlama + Ollama |
 | `openlama config list` | View all settings |
 | `openlama config get <key>` | Get a setting value |
-| `openlama config set <key> <value>` | Change a setting |
+| `openlama config set <key> <value>` | Change a setting (auto-restarts daemon) |
+| `openlama config reset` | Reset all settings |
+| `openlama config stt` | Show STT status |
+| `openlama config stt install` | Install faster-whisper for voice recognition |
+| `openlama config stt enable/disable` | Enable/disable STT |
+| `openlama config obsidian` | Show Obsidian integration status |
+| `openlama config obsidian install` | Install obsidian-cli |
+| `openlama config obsidian vault <name>` | Set Obsidian vault |
+| `openlama config obsidian disable` | Disable Obsidian integration |
 | `openlama skill list` | List installed skills |
 | `openlama skill create` | Create a new skill interactively |
 | `openlama skill delete <name>` | Delete a skill |
@@ -379,15 +512,14 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | `openlama tool list` | List all registered tools |
 | `openlama cron list` | List scheduled tasks |
 | `openlama cron delete <id>` | Delete a scheduled task |
-| `openlama config stt` | Show STT status |
-| `openlama config stt install` | Install faster-whisper for voice recognition |
-| `openlama config stt enable/disable` | Enable/disable STT |
 | `openlama logs` | View daemon logs |
 | `openlama --version` | Show version |
 
 ---
 
 ## Recommended Models
+
+### Desktop / Server
 
 | Model | Size | Best For |
 |-------|------|----------|
@@ -398,9 +530,20 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | `deepseek-r1:8b` | 5.2 GB | Coding tasks |
 | `gemma3:1b` | 0.8 GB | Ultra-light, minimal hardware |
 
+### Mobile (Android)
+
+| Model | Size | Best For |
+|-------|------|----------|
+| **`gemma4:e2b`** | **7.2 GB** | **Best for mobile — 2.3B effective params** |
+| `gemma3:4b` | 3.3 GB | Good balance for mobile |
+| `phi4-mini` | 2.5 GB | Lightweight |
+| `gemma3:1b` | 0.8 GB | Ultra-light, 1GB RAM devices |
+
 ---
 
 ## System Requirements
+
+### Desktop / Server
 
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
@@ -410,6 +553,17 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | OS | macOS / Linux / Windows | macOS (Apple Silicon) |
 | [Ollama](https://ollama.com) | Required | Latest version |
 | [ComfyUI](https://github.com/comfyanonymous/ComfyUI) | Optional | For image generation |
+
+### Android (Termux)
+
+| Component | Minimum | Recommended |
+|-----------|---------|-------------|
+| Android | 10+ | 12+ |
+| RAM | 4 GB (remote mode) | 8 GB+ (on-device) |
+| Disk | 500 MB (remote) | 8 GB+ (on-device) |
+| [Termux](https://f-droid.org/packages/com.termux/) | Required | From F-Droid |
+| [Termux:API](https://f-droid.org/packages/com.termux.api/) | Recommended | For device control |
+| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | Optional | For auto-start |
 
 ---
 
@@ -433,6 +587,8 @@ Key settings:
 | `comfy_enabled` | `false` | Enable ComfyUI integration |
 | `comfy_base` | `http://127.0.0.1:8184` | ComfyUI API URL |
 | `tool_sandbox_path` | `~/sandbox` | Sandbox for code execution |
+| `obsidian_vault` | — | Obsidian vault name (enables obsidian tool) |
+| `stt_enabled` | `auto` | Voice recognition: `true`/`false`/`auto` |
 
 ---
 
@@ -451,7 +607,7 @@ Contributions are welcome! Please:
 ### Development Setup
 
 ```bash
-git clone https://github.com/your-username/openlama.git
+git clone https://github.com/sussa3007/openlama.git
 cd openlama
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
@@ -464,6 +620,7 @@ openlama setup
 
 - [ ] Web UI channel
 - [ ] Discord channel
+- [ ] iOS Shortcuts integration
 - [ ] Multi-user with separate contexts
 - [ ] RAG (Retrieval-Augmented Generation) with local documents
 - [ ] Voice input/output
