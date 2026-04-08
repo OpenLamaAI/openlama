@@ -164,7 +164,7 @@ Call cron_manager with action "create", cron_expr, and task description.
 
 ## Tool-Specific Notes
 - image_generate/image_edit: ComfyUI auto-starts/stops. Translate non-English prompts to English.
-- obsidian: Use directly when user asks about notes. Actions: list, read, create, append, delete, move, search, search_content.
+- obsidian: Use directly when user asks about notes. Actions: list (current level), list_recursive (full tree with all subdirectories and files — use this when user asks for "all files" or "directory structure"), read, create, append, delete, move, search, search_content.
 - self_update: Always action="check" first, then "update" if user confirms.
 """
 

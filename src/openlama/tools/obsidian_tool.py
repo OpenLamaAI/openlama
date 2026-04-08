@@ -88,6 +88,27 @@ async def _run_obsidian(args: list[str], timeout: int = None) -> str:
         return f"Obsidian CLI execution error: {e}"
 
 
+async def _list_recursive(vault_args: list[str], path: str, indent: int = 1, max_depth: int = 4) -> list[str]:
+    """Recursively list subdirectory contents."""
+    if indent > max_depth:
+        return [f"{'  ' * indent}• (max depth reached)"]
+
+    cmd = ["list"] + vault_args + [path]
+    result = await _run_obsidian(cmd)
+    if not result or result.startswith("[Error]") or result.startswith("obsidian-cli"):
+        return []
+
+    lines = [l.strip().lstrip("• ") for l in result.strip().split("\n") if l.strip()]
+    output = []
+    prefix = "  " * indent
+    for line in lines:
+        output.append(f"{prefix}• {line}")
+        if line.endswith("/"):
+            sub_path = path.rstrip("/") + "/" + line.rstrip("/")
+            output.extend(await _list_recursive(vault_args, sub_path, indent + 1, max_depth))
+    return output
+
+
 async def _execute(args: dict) -> str:
     action = args.get("action", "").strip()
     vault = args.get("vault", "").strip() or None
@@ -108,11 +129,34 @@ async def _execute(args: dict) -> str:
     vault_args = ["-v", vault] if vault else []
 
     # ── List files/folders ──
-    if action == "list":
+    if action in ("list", "list_recursive"):
+        recursive = action == "list_recursive" or args.get("recursive", False)
         cmd = ["list"] + vault_args
         if note and note not in ("/", ".", "./", "root"):
             cmd.append(note)
-        return await _run_obsidian(cmd)
+        result = await _run_obsidian(cmd)
+
+        if not recursive:
+            return result
+
+        # Recursive: expand subdirectories
+        lines = [l.strip().lstrip("• ") for l in result.strip().split("\n") if l.strip()]
+        dirs = [l for l in lines if l.endswith("/")]
+        if not dirs:
+            return result
+
+        base = note.rstrip("/") + "/" if note and note not in ("/", ".", "./", "root") else ""
+        all_lines = []
+        for line in lines:
+            if line.endswith("/"):
+                sub_path = base + line.rstrip("/")
+                all_lines.append(f"• {line}")
+                sub_result = await _list_recursive(vault_args, sub_path, indent=1, max_depth=4)
+                all_lines.extend(sub_result)
+            else:
+                all_lines.append(f"• {line}")
+
+        return "\n".join(all_lines) if all_lines else result
 
     # ── Read note ──
     if action == "read":
@@ -216,16 +260,19 @@ register_tool(
             "action": {
                 "type": "string",
                 "description": (
-                    "Action to perform: list (file list), read (read note), create (create note), "
+                    "Action to perform: list (file list — current level only), "
+                    "list_recursive (file list — includes all subdirectories and files), "
+                    "read (read note), create (create note), "
                     "append (append to note), delete (delete note), move (move/rename note), "
                     "search (fuzzy search by name), search_content (search by content), daily (daily note), "
                     "frontmatter_get (view frontmatter), frontmatter_set (edit frontmatter), "
-                    "frontmatter_delete (delete frontmatter key)"
+                    "frontmatter_delete (delete frontmatter key). "
+                    "Use list_recursive when user asks for full directory structure or all files in a folder."
                 ),
             },
             "note": {
                 "type": "string",
-                "description": "Note name or path (e.g., '000_INBOX/memo', 'MY_NOTE'). Used as folder path for list action",
+                "description": "Note name or path (e.g., '000_INBOX/memo', 'MY_NOTE'). Used as folder path for list/list_recursive action",
             },
             "content": {
                 "type": "string",
