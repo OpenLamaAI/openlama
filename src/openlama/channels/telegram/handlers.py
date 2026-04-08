@@ -496,7 +496,7 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
     # Prompt file editing
     if user.state.startswith("await_prompt_edit|"):
         fname = user.state.split("|", 1)[1]
-        allowed_files = {"SOUL.md", "USERS.md", "MEMORY.md", "SYSTEM.md"}
+        allowed_files = {"SOUL.md", "USERS.md", "MEMORY.md"}
         if fname not in allowed_files:
             update_user(uid, state="")
             return True
@@ -1801,7 +1801,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data == "cmd:systemprompt":
         from openlama.core.prompt_builder import _prompts_dir
         d = _prompts_dir()
-        files = ["SOUL.md", "USERS.md", "MEMORY.md", "SYSTEM.md"]
+        files = ["SOUL.md", "USERS.md", "MEMORY.md"]
         buttons = []
         for name in files:
             p = d / name

@@ -388,7 +388,7 @@ def check_prompts_dir() -> CheckResult:
             fixable=True, fix_action="Create prompts directory",
         )
 
-    files = ["SYSTEM.md", "SOUL.md", "USERS.md"]
+    files = ["SOUL.md", "USERS.md"]
     existing = [f for f in files if (prompts_dir / f).exists()]
     missing = [f for f in files if f not in existing]
 

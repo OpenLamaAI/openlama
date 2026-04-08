@@ -86,7 +86,7 @@ def _build_cron_section() -> str:
 
 
 def generate_system_prompt() -> str:
-    """Build SYSTEM.md from templates + current tools, skills, MCP, cron."""
+    """Build system prompt dynamically from current tools, skills, MCP, cron."""
     tool_section = _build_tool_section()
     skills_section = build_skills_section()
     cron_section = _build_cron_section()
@@ -210,7 +210,7 @@ def build_full_system_prompt() -> str:
     """Assemble all prompt files into one system prompt."""
     parts = []
 
-    # Always regenerate SYSTEM.md to include latest tools and skills
+    # Always regenerate system prompt to include latest tools and skills
     system = generate_system_prompt()
     parts.append(system)
 

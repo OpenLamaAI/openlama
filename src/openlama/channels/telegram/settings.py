@@ -155,7 +155,7 @@ async def systemprompt_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     from openlama.core.prompt_builder import _prompts_dir
     d = _prompts_dir()
-    files = ["SOUL.md", "USERS.md", "MEMORY.md", "SYSTEM.md"]
+    files = ["SOUL.md", "USERS.md", "MEMORY.md"]
 
     buttons = []
     for name in files:

@@ -598,7 +598,7 @@ async def _cmd_systemprompt(uid: int, args: str):
     import shutil
 
     d = _prompts_dir()
-    files = ["SOUL.md", "USERS.md", "MEMORY.md", "SYSTEM.md"]
+    files = ["SOUL.md", "USERS.md", "MEMORY.md"]
 
     if args and args in files:
         await _edit_prompt_file(d, args)
