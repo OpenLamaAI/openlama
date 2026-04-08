@@ -47,6 +47,7 @@ from openlama.database import (
     get_admin_password_hash,
     get_allowed_ids,
     get_model_settings,
+    save_model_settings,
     get_user,
     is_allowed,
     is_authed,
@@ -1225,6 +1226,154 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_document(document=buf, caption="📤 Conversation Export")
 
 
+async def compress_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    result_text = await compress_context(user.telegram_id, user)
+    await update.message.reply_text(
+        result_text,
+        reply_markup=main_menu_keyboard(True),
+    )
+
+
+async def session_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    auth_left = max(0, user.auth_until - now_ts())
+    hours = auth_left // 3600
+    mins = (auth_left % 3600) // 60
+    buttons = [
+        [InlineKeyboardButton("➕ Extend 1h", callback_data="session:extend")],
+        [InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu")],
+    ]
+    await update.message.reply_text(
+        f"⏱ <b>Session</b>\n\nRemaining: {hours}h {mins}m ({auth_left}s)",
+        parse_mode="HTML",
+        reply_markup=InlineKeyboardMarkup(buttons),
+    )
+
+
+async def skills_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    from openlama.core.skills import list_skills
+    skills = list_skills()
+    if not skills:
+        await update.message.reply_text(
+            "📋 <b>Skills</b>\n\nNo skills installed.\n"
+            "Create one via chat: <i>\"Create a skill that...\"</i>\n"
+            "Or CLI: <code>openlama skill create</code>",
+            parse_mode="HTML",
+        )
+        return
+    lines = ["📋 <b>Installed Skills</b>\n"]
+    for s in skills:
+        triggers = s.get("trigger", "")[:40]
+        lines.append(f"• <b>{s['name']}</b> — {s.get('description', '')[:50]}")
+        if triggers:
+            lines.append(f"  triggers: <i>{triggers}</i>")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def mcp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    try:
+        from openlama.core.mcp_client import load_mcp_config
+        config = load_mcp_config()
+        servers = config.get("mcpServers", {})
+    except Exception:
+        servers = {}
+    if not servers:
+        await update.message.reply_text(
+            "🔌 <b>MCP Servers</b>\n\nNo servers configured.\n"
+            "Add via CLI: <code>openlama mcp add &lt;name&gt; &lt;cmd&gt;</code>",
+            parse_mode="HTML",
+        )
+        return
+    lines = ["🔌 <b>MCP Servers</b>\n"]
+    for name, cfg in servers.items():
+        cmd = cfg.get("command", "?")
+        args = " ".join(cfg.get("args", []))[:40]
+        lines.append(f"• <b>{name}</b>: {cmd} {args}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def cron_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    from openlama.database import list_cron_jobs
+    jobs = list_cron_jobs()
+    if not jobs:
+        await update.message.reply_text(
+            "📅 <b>Scheduled Tasks</b>\n\nNo tasks registered.\n"
+            "Create via chat: <i>\"매일 9시에 뉴스 요약해줘\"</i>",
+            parse_mode="HTML",
+        )
+        return
+    lines = ["📅 <b>Scheduled Tasks</b>\n"]
+    for j in jobs:
+        status = "✅" if j.get("enabled", True) else "⏸"
+        lines.append(f"{status} #{j['id']}: <code>{j['cron_expr']}</code> — {j['task'][:50]}")
+    await update.message.reply_text("\n".join(lines), parse_mode="HTML")
+
+
+async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    uid = user.telegram_id
+    update_user(uid, state="setup_lang")
+    await update.message.reply_text(
+        "🌍 Select your language / 언어를 선택하세요:",
+        reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🇰🇷 한국어", callback_data="lang:ko")],
+            [InlineKeyboardButton("🇺🇸 English", callback_data="lang:en")],
+            [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang:ja")],
+        ]),
+    )
+
+
+async def set_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    if not context.args or len(context.args) < 2:
+        await update.message.reply_text(
+            "Usage: /set &lt;param&gt; &lt;value&gt;\n\n"
+            "Examples:\n"
+            "  /set temperature 0.8\n"
+            "  /set num_ctx 8192\n"
+            "  /set top_p 0.9\n"
+            "  /set num_predict 2048",
+            parse_mode="HTML",
+        )
+        return
+    param = context.args[0].lower()
+    value = context.args[1]
+    uid = user.telegram_id
+    model = user.selected_model or get_config("default_model")
+    ms = get_model_settings(uid, model)
+    valid_params = {"temperature", "top_p", "num_ctx", "num_predict", "repeat_penalty"}
+    if param not in valid_params:
+        await update.message.reply_text(f"Unknown parameter: {param}\nValid: {', '.join(sorted(valid_params))}")
+        return
+    try:
+        if param in ("num_ctx", "num_predict"):
+            val = int(value)
+        else:
+            val = float(value)
+        save_model_settings(uid, model, **{param: val})
+        await update.message.reply_text(f"✓ {param} = {val} (model: {model})")
+    except ValueError:
+        await update.message.reply_text(f"Invalid value: {value}")
+
+
 # ══════════════════════════════════════════════════════════
 # Message handlers (with per-user queue)
 # ══════════════════════════════════════════════════════════
@@ -2081,6 +2230,13 @@ def register_all_handlers(app: Application):
     app.add_handler(CommandHandler("think", think_cmd))
     app.add_handler(CommandHandler("ollama", ollama_cmd))
     app.add_handler(CommandHandler("export", export_cmd))
+    app.add_handler(CommandHandler("compress", compress_cmd))
+    app.add_handler(CommandHandler("session", session_cmd))
+    app.add_handler(CommandHandler("skills", skills_cmd))
+    app.add_handler(CommandHandler("mcp", mcp_cmd))
+    app.add_handler(CommandHandler("cron", cron_cmd))
+    app.add_handler(CommandHandler("profile", profile_cmd))
+    app.add_handler(CommandHandler("set", set_cmd))
 
     # Callbacks (inline keyboards)
     app.add_handler(CallbackQueryHandler(on_callback))
