@@ -151,6 +151,45 @@ async def _process_due_jobs():
             update_cron_job(job_id, next_run=next_run)
 
 
+async def _daily_memory_flush():
+    """Flush current context for all active users to daily memory.
+
+    Runs once per day. Extracts topics from context items (no LLM call)
+    and saves them to today's daily memory file.
+    """
+    from openlama.database import get_users_with_context, load_context, get_setting, set_setting
+    from openlama.core.memory import extract_topics, save_daily_entry
+
+    today = time.strftime("%Y-%m-%d")
+    last_flush = get_setting("last_daily_flush") or ""
+    if last_flush == today:
+        return  # Already flushed today
+
+    user_ids = get_users_with_context()
+    if not user_ids:
+        set_setting("last_daily_flush", today)
+        return
+
+    flushed = 0
+    for uid in user_ids:
+        ctx = load_context(uid)
+        if not ctx:
+            continue
+        topics = extract_topics(ctx)
+        if topics:
+            save_daily_entry(topics, source="daily_flush")
+            flushed += 1
+
+    set_setting("last_daily_flush", today)
+    if flushed:
+        logger.info("daily memory flush: %d user(s) saved", flushed)
+
+
+def _is_flush_hour() -> bool:
+    """Check if current time is midnight hour (00:xx)."""
+    return time.localtime().tm_hour == 0
+
+
 async def scheduler_loop():
     """Main scheduler loop — runs every 60 seconds."""
     logger.info("scheduler started (check interval: %ds)", CHECK_INTERVAL)
@@ -159,6 +198,14 @@ async def scheduler_loop():
             await _process_due_jobs()
         except Exception as e:
             logger.error("scheduler loop error: %s", e)
+
+        # Daily memory flush at midnight
+        if _is_flush_hour():
+            try:
+                await _daily_memory_flush()
+            except Exception as e:
+                logger.error("daily memory flush error: %s", e)
+
         await asyncio.sleep(CHECK_INTERVAL)
 
 

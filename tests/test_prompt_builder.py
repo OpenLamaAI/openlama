@@ -66,10 +66,13 @@ def test_build_full_system_prompt_includes_users(prompts_dir):
     assert "concise answers" in result
 
 
-def test_build_full_system_prompt_includes_memory(prompts_dir):
+def test_build_full_system_prompt_excludes_memory(prompts_dir):
+    """MEMORY.md should NOT be loaded into the system prompt (accessed via tool only)."""
     (prompts_dir / "MEMORY.md").write_text("# Memory\nUser likes coffee.", encoding="utf-8")
     result = build_full_system_prompt()
-    assert "User likes coffee" in result
+    assert "User likes coffee" not in result
+    # But the memory system description should be present
+    assert "Memory System" in result
 
 
 def test_build_full_system_prompt_assembles_all_parts(prompts_dir):
@@ -79,7 +82,8 @@ def test_build_full_system_prompt_assembles_all_parts(prompts_dir):
     result = build_full_system_prompt()
     assert "uniquely creative" in result
     assert "User is a developer" in result
-    assert "Favorite color is blue" in result
+    # MEMORY.md content should NOT be in prompt
+    assert "Favorite color is blue" not in result
 
 
 # ── is_profile_setup_done ──

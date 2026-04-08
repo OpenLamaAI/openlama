@@ -10,7 +10,10 @@ logger = get_logger("context")
 
 
 def _estimate_tokens(char_count: int) -> int:
-    return max(1, char_count // 3)
+    # Korean/CJK text averages ~1.5 chars per token; English ~4 chars.
+    # Use conservative estimate (chars÷2) to trigger compression early
+    # rather than hitting Ollama's context limit.
+    return max(1, char_count // 2)
 
 
 def _estimate_messages_tokens(system_prompt: str, ctx_items: list[dict], user_text: str = "") -> int:
@@ -26,6 +29,18 @@ def build_context_bar(used_tokens: int, max_tokens: int, turn_count: int) -> str
     filled = int(pct / 100 * width)
     bar = "\u2588" * filled + "\u2591" * (width - filled)
     return f"\U0001f4ca {bar} {pct:.1f}% ({used_tokens:,}/{max_tokens:,} tokens)  |  turns: {turn_count}"
+
+
+# Callback for compress notifications — set by channel handlers
+_compress_notify: callable | None = None
+
+
+def set_compress_notify(fn):
+    """Set callback for compress start/end notifications.
+    fn(status: str) — "start" or "done" or "failed".
+    """
+    global _compress_notify
+    _compress_notify = fn
 
 
 async def maybe_compress(
@@ -53,10 +68,36 @@ async def maybe_compress(
         f"User: {it.get('u', '')}\nAssistant: {it.get('a', '')}" for it in old_items
     )
 
+    # Notify: compression starting
+    if _compress_notify:
+        try:
+            await _compress_notify("start")
+        except Exception:
+            pass
+
     try:
         summary = await summarize_context(model, old_text)
-        logger.info("compressed %d turns \u2192 summary (%d chars), keeping %d recent", len(old_items), len(summary), len(recent_items))
+        logger.info("compressed %d turns → summary (%d chars), keeping %d recent", len(old_items), len(summary), len(recent_items))
+
+        # Auto-save compressed content to daily memory
+        try:
+            from openlama.core.memory import save_daily_entry
+            save_daily_entry(summary, source="context_compression")
+        except Exception as e:
+            logger.warning("failed to save daily memory on compression: %s", e)
+
+        if _compress_notify:
+            try:
+                await _compress_notify("done")
+            except Exception:
+                pass
+
         return recent_items, summary
     except Exception as e:
         logger.error("summarize failed: %s", e)
+        if _compress_notify:
+            try:
+                await _compress_notify("failed")
+            except Exception:
+                pass
         return ctx_items, ""

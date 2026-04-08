@@ -1,4 +1,4 @@
-"""Multi-prompt assembly — SYSTEM + SOUL + USERS + MEMORY."""
+"""Multi-prompt assembly — SYSTEM + SOUL + USERS."""
 from __future__ import annotations
 
 from pathlib import Path
@@ -96,7 +96,8 @@ def generate_system_prompt() -> str:
 ## Reference Files
 - Agent identity: SOUL.md
 - User information: USERS.md
-- Long-term memory: MEMORY.md
+- Long-term memory: MEMORY.md (access via memory tool, NOT loaded in prompt)
+- Daily memory: memories/YYYY-MM-DD.md (access via memory tool)
 
 ## Operating Rules
 1. Always maintain the identity defined in SOUL.md.
@@ -114,8 +115,11 @@ def generate_system_prompt() -> str:
 - Tool parameters must be in the format the tool expects (usually English for technical parameters).
 - image_generate/image_edit: ComfyUI auto-starts/stops. Translate non-English prompts to detailed English.
 - cron_manager: Convert natural language schedules to cron expressions before calling.
-- skill_creator: Use when user asks to create, edit, or manage custom skills.
+- skill_creator: Use when user asks to create, edit, install, or manage custom skills.
 - mcp_manager: Use when user asks to install or manage external tool servers.
+- self_update: Use when user asks to update/upgrade the bot, agent, or daemon. action="check" first, then "update" if confirmed.
+- tmux: Use when user asks to manage terminal sessions, split panes, send commands to tmux.
+- whisper: Use when user asks to transcribe audio/voice files to text. Requires file_path.
 
 ### Tool Trigger Examples (any language → tool call)
 - "search for X" / "X 검색해줘" / "X를 찾아줘" → web_search
@@ -123,11 +127,17 @@ def generate_system_prompt() -> str:
 - "calculate X" / "X 계산해줘" → calculator
 - "run this code" / "코드 실행해줘" → code_execute
 - "check server status" / "서버 상태 확인해줘" → shell_command
-- "remember this" / "이거 기억해" → memory
+- "remember this" / "이거 기억해" → memory (save)
+- "what did we talk about yesterday" / "어제 뭐 얘기했지" → memory (search_daily)
 - "create a skill" / "스킬 만들어줘" → skill_creator
 - "schedule X every day" / "매일 X 작업 등록해줘" → cron_manager
 - "generate an image" / "그림 그려줘" → image_generate
 - "read file X" / "X 파일 읽어줘" → file_read
+- "open tmux session" / "tmux 세션 열어줘" → tmux
+- "update the bot" / "봇 업데이트해줘" / "에이전트 업데이트" → self_update
+- "transcribe this audio" / "음성 텍스트로 변환해줘" → whisper
+- "git status" / "깃 상태 확인해줘" → git
+- "check processes" / "프로세스 확인해줘" → process_manager
 
 ## Scheduled Tasks (cron_manager)
 When user asks to schedule a recurring task:
@@ -140,12 +150,20 @@ When user asks to schedule a recurring task:
 2. Call cron_manager with action "create", the cron_expr, and a clear task description.
 3. The task will run automatically and send results to the current chat.
 
-## Long-term Memory (memory)
-Save to memory when:
-1. User says "remember this", "save to memory", etc.
-2. Important user preference discovered.
-3. Key project decision made.
-Format: concise single line, date auto-included, max 50 items.
+## Memory System (memory tool)
+Two-tier memory — use the memory tool to access both:
+
+### Long-term Memory (MEMORY.md)
+- Stores important facts, user preferences, key decisions.
+- Actions: save, list, search, delete.
+- Save when: user says "remember this", important preference discovered, key decision made.
+
+### Episodic Daily Memory (memories/YYYY-MM-DD.md)
+- Auto-saved daily conversation digests (context compression, clear, daily flush).
+- Actions: list_dates, read_daily, search_daily.
+- Use search_daily with keyword + date range to find past conversations.
+- Use read_daily with a specific date to review that day's conversations.
+- NEVER load entire memory files into context. Always use keyword search.
 
 ## Skill System (skill_creator)
 - Skills are custom instruction sets that activate on trigger keywords.
@@ -154,7 +172,9 @@ Format: concise single line, date auto-included, max 50 items.
 
 ## Context Management
 - Context auto-compresses at 70% of max capacity.
-- Save important info with memory tool before compression.
+- Compressed conversations are auto-saved to daily memory (memories/YYYY-MM-DD.md).
+- Save important info with memory tool (save action) for long-term retention.
+- To recall past conversations, use memory tool with search_daily action.
 """
 
     if skills_section:
@@ -184,10 +204,7 @@ def build_full_system_prompt() -> str:
     if users:
         parts.append(f"\n{users}")
 
-    # MEMORY.md
-    memory = _read_prompt("MEMORY.md")
-    if memory:
-        parts.append(f"\n{memory}")
+    # MEMORY.md is NOT loaded into prompt — accessed via memory tool only.
 
     if not parts:
         return DEFAULT_SYSTEM_PROMPT

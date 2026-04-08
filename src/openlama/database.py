@@ -245,6 +245,15 @@ def load_context(uid: int) -> list[dict]:
         return []
 
 
+def get_users_with_context() -> list[int]:
+    """Return user IDs that have non-empty context."""
+    with db_conn() as conn:
+        rows = conn.execute(
+            "SELECT user_id FROM contexts WHERE items_json != '[]'"
+        ).fetchall()
+    return [row["user_id"] for row in rows]
+
+
 def save_context(uid: int, items: list[dict]):
     with db_conn() as conn:
         conn.execute(
