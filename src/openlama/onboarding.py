@@ -337,9 +337,13 @@ def _step_models():
 
     import questionary
     choices = []
+    recommended_tags = {tag for tag, _, _ in model_list}
     for tag, size, cat in model_list:
         prefix = "✓ " if tag in installed else "  "
         choices.append(questionary.Choice(f"{prefix}{tag:20s} {size:>8s}  [{cat}]", value=tag, checked=tag in installed))
+    # Add installed models not in recommended list
+    for tag in sorted(installed - recommended_tags):
+        choices.append(questionary.Choice(f"✓ {tag:20s}            [installed]", value=tag, checked=True))
     choices.append(questionary.Choice("  [Custom input]", value="_custom"))
 
     selected = questionary.checkbox("  Select models to download:", choices=choices).ask()
