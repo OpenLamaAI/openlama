@@ -161,8 +161,22 @@ def start(daemon, with_cli, install_service, uninstall_service):
         from openlama.daemon import start_daemon
         start_daemon()
     else:
-        from openlama.channels.telegram.bot import main as run_telegram
-        run_telegram()
+        from openlama.config import TERMUX
+        if TERMUX:
+            # Foreground mode on Termux: acquire wake-lock to survive screen-off
+            import subprocess as _sp
+            result = _sp.run(["termux-wake-lock"], capture_output=True, timeout=5)
+            if result.returncode == 0:
+                click.echo("  🔒 Wake lock acquired")
+            else:
+                click.echo("  ⚠ termux-wake-lock failed — process may be killed when screen is off")
+                click.echo("    Install Termux:API app from F-Droid and run: pkg install termux-api")
+        try:
+            from openlama.channels.telegram.bot import main as run_telegram
+            run_telegram()
+        finally:
+            if TERMUX:
+                _sp.run(["termux-wake-unlock"], capture_output=True, timeout=5)
 
 @main.command()
 def stop():

@@ -250,7 +250,7 @@ AI는 어떤 언어로 요청해도 도구를 사용합니다:
 
 ## Android (Termux) 설치 가이드
 
-openlama는 [Termux](https://f-droid.org/packages/com.termux/)를 통해 Android에서 실행됩니다. 두 가지 모드를 지원합니다.
+openlama는 [Termux](https://termux.dev)를 통해 Android에서 실행됩니다. 두 가지 모드를 지원합니다.
 
 ### 모드 1: 원격 추론 (권장)
 
@@ -258,10 +258,23 @@ openlama는 [Termux](https://f-droid.org/packages/com.termux/)를 통해 Android
 
 #### 사전 준비
 
-- [Termux](https://f-droid.org/packages/com.termux/) — **F-Droid**에서 설치 (Play Store 버전은 지원 안 됨)
-- [Termux:API](https://f-droid.org/packages/com.termux.api/) — 디바이스 제어용 (카메라, 문자, 센서)
-- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — 부팅 시 자동 시작 (선택)
+- **Termux** — [F-Droid](https://f-droid.org/packages/com.termux/) 또는 [GitHub Releases](https://github.com/termux/termux-app/releases)에서 설치 (권장). [Google Play 버전](https://play.google.com/store/apps/details?id=com.termux)은 기본 봇 실행은 가능하지만 플러그인 미지원 (아래 참고).
+- [Termux:API](https://f-droid.org/packages/com.termux.api/) — 디바이스 전체 제어용 (카메라, 문자, GPS, 센서). **F-Droid/GitHub 전용.**
+- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — 부팅 시 자동 시작. **F-Droid/GitHub 전용.**
 - Ollama가 실행 중인 데스크톱/서버 (네트워크 접근 가능)
+
+> **F-Droid vs Play Store vs GitHub:**
+>
+> | | F-Droid / GitHub | Google Play |
+> |---|---|---|
+> | 봇 데몬 + 원격 Ollama | ✅ | ✅ |
+> | Termux:API 플러그인 (35개 디바이스 액션) | ✅ | ❌ (일부 내장) |
+> | Termux:Boot (부팅 자동시작) | ✅ | ❌ |
+> | 최신 기능 (v0.118+) | ✅ | ❌ (v0.108 수준) |
+>
+> 모든 Termux APK는 **같은 출처**에서 설치해야 합니다 (F-Droid, GitHub, Play Store 중 택일). 출처를 섞으면 서명키 불일치로 설치 실패합니다. F-Droid와 GitHub APK는 동일한 서명키를 사용하므로 호환됩니다.
+>
+> **Google Play Protect**가 F-Droid/GitHub APK 설치를 차단할 수 있습니다. 경고를 무시하거나 설치 중 Play Protect를 일시 비활성화하세요.
 
 #### 설치 과정
 
@@ -285,7 +298,7 @@ openlama setup
 # 5. 봇 시작
 openlama start -d
 
-# 6. (선택) 부팅 시 자동 시작 등록
+# 6. (선택) 부팅 시 자동 시작 등록 (F-Droid/GitHub 전용)
 openlama start --install-service
 ```
 
@@ -309,7 +322,7 @@ openlama start -d
 
 ### Android 디바이스 제어
 
-Android에서 실행 시, `termux_device` 도구로 AI가 휴대폰을 제어할 수 있습니다:
+Android에서 실행 시, `termux_device` 도구로 AI가 휴대폰을 제어할 수 있습니다 ([Termux:API](https://f-droid.org/packages/com.termux.api/) F-Droid/GitHub 설치 필요):
 
 | 카테고리 | 기능 |
 |----------|------|
@@ -334,13 +347,22 @@ Android에서 실행 시, `termux_device` 도구로 AI가 휴대폰을 제어할
 | `phi4-mini` | 2.5 GB | 경량 |
 | `gemma3:1b` | 0.8 GB | 초경량, 최소 하드웨어 |
 
-### 배터리 최적화
+### Android에서 openlama 유지하기
 
-- openlama는 Android가 프로세스를 종료하지 않도록 **wake lock**을 자동 획득합니다
-- Termux의 배터리 최적화를 비활성화하세요:
-  - Samsung: 설정 → 배터리 → 앱 절전 관리 → Termux → 최적화 안 함
-  - Xiaomi: 설정 → 배터리 → 앱 배터리 절약 → Termux → 제한 없음
-  - 기타: 설정 → 앱 → Termux → 배터리 → 제한 없음
+openlama는 화면이 꺼져도 CPU가 동작하도록 **wake lock**을 자동 획득합니다. 하지만 최신 Android에서는 wake lock만으로 부족하므로 추가 설정이 필요합니다:
+
+**필수 (모든 기기):**
+- 배터리 최적화 해제: 설정 → 앱 → Termux → 배터리 → **제한 없음**
+
+**필수 (Android 12 이상):**
+- 팬텀 프로세스 킬러 비활성화: 설정 → 개발자 옵션 → **자식 프로세스 제한 비활성화**
+- 개발자 옵션이 없다면: 설정 → 휴대전화 정보 → 빌드 번호 7회 탭
+
+**제조사별 ([dontkillmyapp.com](https://dontkillmyapp.com) 참고):**
+- **삼성**: 설정 → 배터리 → 백그라운드 사용 제한 → 절전 제외 앱 → Termux 추가
+- **샤오미/MIUI**: 설정 → 배터리 → 앱 배터리 절약 → Termux → 제한 없음; 자동시작도 허용
+- **화웨이/EMUI**: 설정 → 배터리 → 앱 실행 → Termux → 수동 관리 (모두 허용)
+- **원플러스**: 설정 → 배터리 → 배터리 최적화 → Termux → 최적화 안 함
 
 ---
 
@@ -544,12 +566,12 @@ openlama cron delete 1   # 작업 삭제
 
 | 항목 | 최소 | 권장 |
 |------|------|------|
-| Android | 10+ | 12+ |
+| Android | 7+ | 12+ |
 | RAM | 4 GB (원격 모드) | 8 GB+ (온디바이스) |
 | 디스크 | 500 MB (원격) | 8 GB+ (온디바이스) |
-| [Termux](https://f-droid.org/packages/com.termux/) | 필수 | F-Droid에서 설치 |
-| [Termux:API](https://f-droid.org/packages/com.termux.api/) | 권장 | 디바이스 제어용 |
-| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | 선택 | 자동 시작용 |
+| [Termux](https://f-droid.org/packages/com.termux/) | 필수 | [F-Droid](https://f-droid.org/packages/com.termux/) 또는 [GitHub](https://github.com/termux/termux-app/releases) |
+| [Termux:API](https://f-droid.org/packages/com.termux.api/) | 권장 | 디바이스 제어용 (F-Droid/GitHub 전용) |
+| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | 선택 | 자동 시작용 (F-Droid/GitHub 전용) |
 
 ---
 

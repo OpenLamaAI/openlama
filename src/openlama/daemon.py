@@ -62,6 +62,16 @@ def start_daemon():
                 )
                 if result.returncode == 0:
                     print("   🔒 Wake lock acquired")
+                else:
+                    print("   ⚠ termux-wake-lock failed — process may be killed when screen is off")
+                    print("     Install Termux:API app from F-Droid and run: pkg install termux-api")
+                # Ensure wake-unlock on any exit (crash, OOM, SIGTERM)
+                import atexit
+                atexit.register(
+                    lambda: subprocess.run(
+                        ["termux-wake-unlock"], capture_output=True, timeout=5,
+                    )
+                )
         finally:
             log_fd.close()
         return

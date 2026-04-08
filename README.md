@@ -253,7 +253,7 @@ The AI understands tool requests in any language:
 
 ## Android (Termux) Setup
 
-openlama runs on Android via [Termux](https://f-droid.org/packages/com.termux/). Two modes are supported:
+openlama runs on Android via [Termux](https://termux.dev). Two modes are supported:
 
 ### Mode 1: Remote Inference (Recommended)
 
@@ -261,10 +261,23 @@ Run the bot on your phone, inference on a desktop/server with a GPU.
 
 #### Prerequisites
 
-- [Termux](https://f-droid.org/packages/com.termux/) — Install from **F-Droid** (not Play Store)
-- [Termux:API](https://f-droid.org/packages/com.termux.api/) — For device control (camera, SMS, sensors)
-- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — For auto-start on boot (optional)
+- **Termux** — Install from [F-Droid](https://f-droid.org/packages/com.termux/) or [GitHub Releases](https://github.com/termux/termux-app/releases) (recommended). The [Google Play version](https://play.google.com/store/apps/details?id=com.termux) works for basic bot operation but lacks plugin support (see note below).
+- [Termux:API](https://f-droid.org/packages/com.termux.api/) — For full device control (camera, SMS, GPS, sensors). **F-Droid/GitHub only.**
+- [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) — For auto-start on boot. **F-Droid/GitHub only.**
 - A desktop/server running Ollama (accessible on the network)
+
+> **F-Droid vs Play Store vs GitHub:**
+>
+> | | F-Droid / GitHub | Google Play |
+> |---|---|---|
+> | Bot daemon + remote Ollama | ✅ | ✅ |
+> | Termux:API plugin (35 device actions) | ✅ | ❌ (some built-in) |
+> | Termux:Boot (auto-start on boot) | ✅ | ❌ |
+> | Latest features (v0.118+) | ✅ | ❌ (equivalent to v0.108) |
+>
+> All Termux APKs must come from the **same source** (F-Droid, GitHub, or Play Store). Mixing sources will fail due to different signing keys. F-Droid and GitHub APKs share the same key and are interchangeable.
+>
+> **Google Play Protect** may block F-Droid/GitHub APK installation. Dismiss the warning or temporarily disable Play Protect during install.
 
 #### Installation
 
@@ -288,7 +301,7 @@ openlama setup
 # 5. Start the bot
 openlama start -d
 
-# 6. (Optional) Auto-start on boot
+# 6. (Optional) Auto-start on boot (F-Droid/GitHub only)
 openlama start --install-service
 ```
 
@@ -312,7 +325,7 @@ openlama start -d
 
 ### Android Device Control
 
-When running on Android, the `termux_device` tool gives the AI control over your phone:
+When running on Android, the `termux_device` tool gives the AI control over your phone (requires [Termux:API](https://f-droid.org/packages/com.termux.api/) from F-Droid/GitHub):
 
 | Category | Actions |
 |----------|---------|
@@ -337,13 +350,22 @@ Safety rules are enforced:
 | `phi4-mini` | 2.5 GB | Lightweight |
 | `gemma3:1b` | 0.8 GB | Ultra-light, minimal hardware |
 
-### Battery Optimization
+### Keeping openlama Alive on Android
 
-- openlama acquires a **wake lock** automatically to prevent Android from killing the process
-- Disable battery optimization for Termux in your phone settings:
-  - Samsung: Settings → Battery → App power management → Termux → Don't optimize
-  - Xiaomi: Settings → Battery → App battery saver → Termux → No restrictions
-  - Other: Settings → Apps → Termux → Battery → Unrestricted
+openlama acquires a **wake lock** automatically to keep the CPU running when the screen is off. However, wake lock alone is not sufficient on modern Android — you must also configure your device:
+
+**Required (all devices):**
+- Disable battery optimization: Settings → Apps → Termux → Battery → **Unrestricted**
+
+**Required (Android 12+):**
+- Disable phantom process killer: Settings → Developer Options → **Disable child process restrictions**
+- If Developer Options is not available, enable it via Settings → About Phone → tap Build Number 7 times
+
+**OEM-specific (check [dontkillmyapp.com](https://dontkillmyapp.com) for your device):**
+- **Samsung**: Settings → Battery → Background usage limits → Never sleeping apps → Add Termux
+- **Xiaomi/MIUI**: Settings → Battery → App battery saver → Termux → No restrictions; also enable Auto-start
+- **Huawei/EMUI**: Settings → Battery → App launch → Termux → Manage manually (enable all)
+- **OnePlus**: Settings → Battery → Battery optimization → Termux → Don't optimize
 
 ---
 
@@ -558,12 +580,12 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 
 | Component | Minimum | Recommended |
 |-----------|---------|-------------|
-| Android | 10+ | 12+ |
+| Android | 7+ | 12+ |
 | RAM | 4 GB (remote mode) | 8 GB+ (on-device) |
 | Disk | 500 MB (remote) | 8 GB+ (on-device) |
-| [Termux](https://f-droid.org/packages/com.termux/) | Required | From F-Droid |
-| [Termux:API](https://f-droid.org/packages/com.termux.api/) | Recommended | For device control |
-| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | Optional | For auto-start |
+| [Termux](https://f-droid.org/packages/com.termux/) | Required | From [F-Droid](https://f-droid.org/packages/com.termux/) or [GitHub](https://github.com/termux/termux-app/releases) |
+| [Termux:API](https://f-droid.org/packages/com.termux.api/) | Recommended | For device control (F-Droid/GitHub only) |
+| [Termux:Boot](https://f-droid.org/packages/com.termux.boot/) | Optional | For auto-start (F-Droid/GitHub only) |
 
 ---
 

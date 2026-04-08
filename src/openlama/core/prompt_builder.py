@@ -104,6 +104,7 @@ Understand any language; use tools directly without pre-checks.
 5. When listing files, directories, or data — ONLY show what the tool returned. Do NOT invent names.
 6. Use tools multiple times if needed to fulfill the user's request completely.
 7. For nested directories, call the tool for each level — do not assume contents.
+8. Tool parameters (file names, paths, process names) are usually in English. If a user says "뉴스 폴더" try "News"; "설정 파일" try "config". When a lookup fails, retry with the translated English name before giving up.
 
 ## Tools
 {tool_section}
