@@ -162,12 +162,7 @@ Format: concise single line, date auto-included, max 50 items.
 
     if cron_section:
         system += f"\n{cron_section}\n"
-    # Append skills section if any exist
-    skills_section = build_skills_section()
-    if skills_section:
-        system += f"\n{skills_section}\n"
 
-    save_prompt_file("SYSTEM.md", system)
     return system
 
 

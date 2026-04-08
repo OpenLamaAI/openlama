@@ -2,17 +2,8 @@
 
 from pathlib import Path
 
-from openlama.config import get_config, get_config_bool
 from openlama.tools.registry import register_tool
-
-
-def _is_safe_path(path: str) -> bool:
-    if not get_config_bool("tool_sandbox_enabled", True):
-        return True
-    resolved = Path(path).resolve()
-    sandbox = get_config("tool_sandbox_path")
-    allowed = [Path(sandbox).resolve(), Path.home().resolve()]
-    return any(str(resolved).startswith(str(a)) for a in allowed)
+from openlama.utils.sandbox import is_safe_path
 
 
 async def _execute(args: dict) -> str:
@@ -22,7 +13,7 @@ async def _execute(args: dict) -> str:
 
     if not path:
         return "Please provide a file path."
-    if not _is_safe_path(path):
+    if not is_safe_path(path):
         return f"Access denied for path: {path}"
 
     p = Path(path)

@@ -1,7 +1,7 @@
 """Skills system — discover, load, match, and inject user-defined skills."""
 from __future__ import annotations
 
-import re
+import time
 from pathlib import Path
 from typing import Optional
 
@@ -9,6 +9,11 @@ from openlama.config import get_config, DATA_DIR
 from openlama.logger import get_logger
 
 logger = get_logger("skills")
+
+# Cache: invalidated by save_skill/delete_skill
+_skills_cache: list[dict] | None = None
+_skills_cache_ts: float = 0
+_CACHE_TTL = 30  # seconds
 
 
 def _skills_dir() -> Path:
@@ -46,64 +51,55 @@ def _parse_frontmatter(text: str) -> tuple[dict, str]:
     return meta, body
 
 
-def discover_skills() -> list[dict]:
-    """Scan skills directory and return metadata for all skills.
+def _invalidate_cache():
+    global _skills_cache, _skills_cache_ts
+    _skills_cache = None
+    _skills_cache_ts = 0
 
-    Returns list of:
-    {
-        "name": str,
-        "description": str,
-        "trigger": str,  # comma-separated trigger keywords
-        "path": str,     # directory path
-    }
-    """
+
+def discover_skills() -> list[dict]:
+    """Scan skills directory and return metadata for all skills. Cached for 30s."""
+    global _skills_cache, _skills_cache_ts
+    now = time.time()
+    if _skills_cache is not None and (now - _skills_cache_ts) < _CACHE_TTL:
+        return _skills_cache
+
     d = _skills_dir()
     if not d.exists():
+        _skills_cache = []
+        _skills_cache_ts = now
         return []
 
     skills = []
     for skill_dir in sorted(d.iterdir()):
         if not skill_dir.is_dir():
             continue
-        skill_md = skill_dir / "SKILL.md"
-        if not skill_md.exists():
-            continue
-
         try:
-            meta, _ = _parse_frontmatter(skill_md.read_text(encoding="utf-8"))
+            skill_md = skill_dir / "SKILL.md"
+            text = skill_md.read_text(encoding="utf-8")
+            meta, body = _parse_frontmatter(text)
             name = meta.get("name", skill_dir.name)
             skills.append({
                 "name": name,
                 "description": meta.get("description", ""),
                 "trigger": meta.get("trigger", ""),
+                "body": body,
                 "path": str(skill_dir),
             })
         except Exception as e:
             logger.warning("failed to parse skill %s: %s", skill_dir.name, e)
 
+    _skills_cache = skills
+    _skills_cache_ts = now
     return skills
 
 
 def load_skill(name: str) -> Optional[dict]:
-    """Load a skill by name. Returns full skill data including body."""
-    d = _skills_dir() / name
-    skill_md = d / "SKILL.md"
-    if not skill_md.exists():
-        return None
-
-    try:
-        text = skill_md.read_text(encoding="utf-8")
-        meta, body = _parse_frontmatter(text)
-        return {
-            "name": meta.get("name", name),
-            "description": meta.get("description", ""),
-            "trigger": meta.get("trigger", ""),
-            "body": body,
-            "path": str(d),
-        }
-    except Exception as e:
-        logger.error("failed to load skill %s: %s", name, e)
-        return None
+    """Load a skill by name. Uses cache from discover_skills() when available."""
+    for s in discover_skills():
+        if s["name"] == name:
+            return s
+    return None
 
 
 def list_skills() -> list[dict]:
@@ -184,6 +180,7 @@ trigger: "{trigger}"
 {instructions}
 """
     (d / "SKILL.md").write_text(content, encoding="utf-8")
+    _invalidate_cache()
     logger.info("saved skill: %s at %s", name, d)
     return str(d)
 
@@ -195,5 +192,6 @@ def delete_skill(name: str) -> bool:
     if not d.exists():
         return False
     shutil.rmtree(d)
+    _invalidate_cache()
     logger.info("deleted skill: %s", name)
     return True

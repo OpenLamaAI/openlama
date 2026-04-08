@@ -21,6 +21,7 @@ class Tool:
 
 
 _TOOLS: dict[str, Tool] = {}
+_tools_cache: dict[bool, list[dict]] | None = None
 
 
 def register_tool(
@@ -30,6 +31,7 @@ def register_tool(
     execute: ToolFn,
     admin_only: bool = False,
 ):
+    global _tools_cache
     _TOOLS[name] = Tool(
         name=name,
         description=description,
@@ -37,6 +39,7 @@ def register_tool(
         execute=execute,
         admin_only=admin_only,
     )
+    _tools_cache = None  # invalidate
 
 
 def get_tool(name: str) -> Optional[Tool]:
@@ -48,7 +51,13 @@ def get_all_tools() -> list[Tool]:
 
 
 def format_tools_for_ollama(admin: bool = True) -> list[dict]:
-    """Convert registered tools to Ollama's tools parameter format."""
+    """Convert registered tools to Ollama's tools parameter format. Cached."""
+    global _tools_cache
+    if _tools_cache is None:
+        _tools_cache = {}
+    if admin in _tools_cache:
+        return _tools_cache[admin]
+
     tools = []
     for t in _TOOLS.values():
         if t.admin_only and not admin:
@@ -61,6 +70,7 @@ def format_tools_for_ollama(admin: bool = True) -> list[dict]:
                 "parameters": t.parameters,
             },
         })
+    _tools_cache[admin] = tools
     return tools
 
 

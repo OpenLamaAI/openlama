@@ -2,7 +2,6 @@
 from pathlib import Path
 from openlama.config import get_config
 from openlama.tools.registry import register_tool
-import json
 from datetime import datetime
 
 async def _execute(args: dict) -> str:

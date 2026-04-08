@@ -21,7 +21,7 @@ from openlama.core.commands import COMMANDS, get_commands_by_category, format_he
 from openlama.config import get_config
 from openlama.database import (
     init_db, get_user, get_allowed_ids, get_model_settings,
-    load_context, clear_context, update_user, db_conn,
+    load_context, clear_context, update_user,
 )
 from openlama.tools import init_tools
 from openlama.ollama_client import ensure_ollama_running, list_models
@@ -32,6 +32,9 @@ logger = get_logger("cli.chat")
 console = Console()
 
 CLI_FALLBACK_UID = 1
+
+# Cached values
+_bot_username_cache: str | None = None
 
 
 # ─── Helpers ─────────────────────────────
@@ -60,16 +63,19 @@ def _get_status_line(uid: int) -> str:
     est = _estimate_messages_tokens(sp, ctx)
     pct = min(est / num_ctx * 100, 100) if num_ctx > 0 else 0
 
-    token = get_config("telegram_bot_token")
-    bot_name = ""
-    if token:
-        try:
-            import httpx
-            r = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=3)
-            if r.status_code == 200:
-                bot_name = r.json().get("result", {}).get("username", "")
-        except Exception:
-            pass
+    global _bot_username_cache
+    if _bot_username_cache is None:
+        token = get_config("telegram_bot_token")
+        _bot_username_cache = ""
+        if token:
+            try:
+                import httpx
+                r = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=3)
+                if r.status_code == 200:
+                    _bot_username_cache = r.json().get("result", {}).get("username", "")
+            except Exception:
+                pass
+    bot_name = _bot_username_cache
 
     parts = []
     parts.append(f"model: {model}")
@@ -89,8 +95,7 @@ async def _ensure_model(uid: int) -> bool:
 
     default = get_config("default_model")
     if default:
-        with db_conn() as conn:
-            conn.execute("UPDATE users SET selected_model=? WHERE telegram_id=?", (default, uid))
+        update_user(uid, selected_model=default)
         return True
 
     return await _select_model(uid)
@@ -115,8 +120,7 @@ async def _select_model(uid: int) -> bool:
         idx = int(choice.strip()) - 1
         if 0 <= idx < len(models):
             selected = models[idx]
-            with db_conn() as conn:
-                conn.execute("UPDATE users SET selected_model=? WHERE telegram_id=?", (selected, uid))
+            update_user(uid, selected_model=selected)
             console.print(f"  Model: [cyan]{selected}[/cyan]\n")
             return True
     except (ValueError, EOFError):
@@ -293,8 +297,7 @@ async def _cmd_model(uid: int, args: str):
         # Set model directly
         models = await list_models()
         if args in models:
-            with db_conn() as conn:
-                conn.execute("UPDATE users SET selected_model=? WHERE telegram_id=?", (args, uid))
+            update_user(uid, selected_model=args)
             console.print(f"  Model changed to: [cyan]{args}[/cyan]\n")
         else:
             console.print(f"  [red]Model '{args}' not found.[/red]\n")

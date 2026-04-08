@@ -1,6 +1,7 @@
 """Cron manager tool — create, list, delete, enable/disable scheduled tasks."""
 from __future__ import annotations
 
+import datetime
 import time
 
 from openlama.tools.registry import register_tool
@@ -35,7 +36,6 @@ async def _cron_manager(args: dict) -> str:
             status = "ON" if j["enabled"] else "OFF"
             next_ts = j.get("next_run", 0)
             if next_ts > 0:
-                import datetime
                 next_str = datetime.datetime.fromtimestamp(next_ts).strftime("%Y-%m-%d %H:%M")
             else:
                 next_str = "not set"
@@ -78,7 +78,6 @@ async def _cron_manager(args: dict) -> str:
             next_run=next_run,
         )
 
-        import datetime
         next_str = datetime.datetime.fromtimestamp(next_run).strftime("%Y-%m-%d %H:%M") if next_run else "?"
 
         return (
