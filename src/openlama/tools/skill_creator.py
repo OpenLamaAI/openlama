@@ -75,7 +75,47 @@ async def _skill_creator(args: dict) -> str:
             return f"Skill '{name}' has been deleted."
         return f"Skill '{name}' not found."
 
-    return f"Unknown action: {action}. Available: create, list, view, update, delete"
+    if action == "install":
+        file_path = args.get("file_path", "").strip()
+        if not file_path:
+            return "file_path is required (path to a SKILL.md file or a directory containing one)."
+
+        from pathlib import Path
+        import shutil
+        from openlama.core.skills import _skills_dir, _invalidate_cache, _parse_frontmatter
+
+        p = Path(file_path)
+        if not p.exists():
+            return f"Path not found: {file_path}"
+
+        # If it's a file, check if it's a SKILL.md
+        if p.is_file():
+            if p.name != "SKILL.md":
+                return "File must be named SKILL.md."
+            skill_dir = p.parent
+        else:
+            # Directory — check for SKILL.md inside
+            skill_md = p / "SKILL.md"
+            if not skill_md.exists():
+                return f"No SKILL.md found in {file_path}"
+            skill_dir = p
+
+        # Parse to get name
+        content = (skill_dir / "SKILL.md").read_text(encoding="utf-8")
+        meta = _parse_frontmatter(content)
+        name = meta.get("name", skill_dir.name)
+
+        # Copy to skills directory
+        dest = _skills_dir() / name
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        if dest.exists():
+            shutil.rmtree(dest)
+        shutil.copytree(skill_dir, dest)
+        _invalidate_cache()
+
+        return f"Skill '{name}' installed from {file_path}."
+
+    return f"Unknown action: {action}. Available: create, list, view, update, delete, install"
 
 
 register_tool(
@@ -86,7 +126,7 @@ register_tool(
         "properties": {
             "action": {
                 "type": "string",
-                "enum": ["create", "list", "view", "update", "delete"],
+                "enum": ["create", "list", "view", "update", "delete", "install"],
                 "description": "Action to perform",
             },
             "name": {
@@ -104,6 +144,10 @@ register_tool(
             "instructions": {
                 "type": "string",
                 "description": "Skill instructions -- behavioral rules in markdown format",
+            },
+            "file_path": {
+                "type": "string",
+                "description": "Path to a SKILL.md file or directory (for install action)",
             },
         },
         "required": ["action"],
