@@ -88,10 +88,18 @@ async def _run_obsidian(args: list[str], timeout: int = None) -> str:
         return f"Obsidian CLI execution error: {e}"
 
 
-async def _list_recursive(vault_args: list[str], path: str, indent: int = 1, max_depth: int = 4) -> list[str]:
-    """Recursively list subdirectory contents."""
+_EXPAND_THRESHOLD = 20  # Expand subdirectory if it has ≤ this many items
+
+
+async def _list_tree(vault_args: list[str], path: str, indent: int = 1, max_depth: int = 4) -> list[str]:
+    """Recursively list directory tree with smart summarization.
+
+    - If a subdirectory has ≤ _EXPAND_THRESHOLD items: expand fully.
+    - If a subdirectory has > _EXPAND_THRESHOLD items: show summary "(N files, M folders)".
+    - The model can drill into summarized folders with a separate list call.
+    """
     if indent > max_depth:
-        return [f"{'  ' * indent}• (max depth reached)"]
+        return []
 
     cmd = ["list"] + vault_args + [path]
     result = await _run_obsidian(cmd)
@@ -99,13 +107,39 @@ async def _list_recursive(vault_args: list[str], path: str, indent: int = 1, max
         return []
 
     lines = [l.strip().lstrip("• ") for l in result.strip().split("\n") if l.strip()]
-    output = []
     prefix = "  " * indent
+    output = []
+
     for line in lines:
-        output.append(f"{prefix}• {line}")
         if line.endswith("/"):
+            # Peek into subdirectory to decide expand vs summarize
             sub_path = path.rstrip("/") + "/" + line.rstrip("/")
-            output.extend(await _list_recursive(vault_args, sub_path, indent + 1, max_depth))
+            sub_cmd = ["list"] + vault_args + [sub_path]
+            sub_result = await _run_obsidian(sub_cmd)
+            if not sub_result or sub_result.startswith("[Error]"):
+                output.append(f"{prefix}• {line}")
+                continue
+
+            sub_items = [l.strip().lstrip("• ") for l in sub_result.strip().split("\n") if l.strip()]
+            n_files = sum(1 for s in sub_items if not s.endswith("/"))
+            n_dirs = sum(1 for s in sub_items if s.endswith("/"))
+
+            if len(sub_items) <= _EXPAND_THRESHOLD:
+                # Small enough — expand fully
+                output.append(f"{prefix}• {line}")
+                output.extend(await _list_tree(vault_args, sub_path, indent + 1, max_depth))
+            else:
+                # Too many items — summarize
+                summary_parts = []
+                if n_files:
+                    summary_parts.append(f"{n_files} files")
+                if n_dirs:
+                    summary_parts.append(f"{n_dirs} folders")
+                summary = ", ".join(summary_parts)
+                output.append(f"{prefix}• {line} ({summary}) — use list_recursive on this path for details")
+        else:
+            output.append(f"{prefix}• {line}")
+
     return output
 
 
@@ -139,10 +173,10 @@ async def _execute(args: dict) -> str:
         if not recursive:
             return result
 
-        # Recursive: expand subdirectories
+        # Recursive: smart tree with auto-summarization
         lines = [l.strip().lstrip("• ") for l in result.strip().split("\n") if l.strip()]
-        dirs = [l for l in lines if l.endswith("/")]
-        if not dirs:
+        has_dirs = any(l.endswith("/") for l in lines)
+        if not has_dirs:
             return result
 
         base = note.rstrip("/") + "/" if note and note not in ("/", ".", "./", "root") else ""
@@ -151,8 +185,7 @@ async def _execute(args: dict) -> str:
             if line.endswith("/"):
                 sub_path = base + line.rstrip("/")
                 all_lines.append(f"• {line}")
-                sub_result = await _list_recursive(vault_args, sub_path, indent=1, max_depth=4)
-                all_lines.extend(sub_result)
+                all_lines.extend(await _list_tree(vault_args, sub_path, indent=1, max_depth=4))
             else:
                 all_lines.append(f"• {line}")
 
