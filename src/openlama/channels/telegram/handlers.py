@@ -93,6 +93,17 @@ from openlama.logger import get_logger
 logger = get_logger("telegram.handlers")
 
 
+def _save_and_clear(uid: int):
+    """Save current context to daily memory, then clear."""
+    ctx = load_context(uid)
+    if ctx:
+        from openlama.core.memory import extract_topics, save_daily_entry
+        topics = extract_topics(ctx)
+        if topics:
+            save_daily_entry(topics, source="context_clear")
+    clear_context(uid)
+
+
 # ══════════════════════════════════════════════════════════
 # Keyboard builders
 # ══════════════════════════════════════════════════════════
@@ -206,36 +217,40 @@ HELP_TEXT = """<b>📖 Openlama User Guide</b>
 • /rm — Delete model
 
 <b>⚙️ Settings</b>
-• /settings — Model parameters (with descriptions)
+• /settings — Model parameters
 • /systemprompt — System prompt
-• /think — Show reasoning process (on/off)
-• /clear — Clear context
+• /think — Toggle reasoning mode
 
-<b>🖥 Server Management</b>
-• /ollama — Ollama server status/management
-• 🎨 ComfyUI — Image generation engine status
-• 📋 Session — Check/extend authentication status
+<b>💬 Context</b>
+• /clear — Clear conversation context
+• /compress — Compress context (summarize)
+• /export — Export conversation history
+• /session — View/extend auth session
+
+<b>🖥 System</b>
+• /ollama — Ollama server management
+• /skills — List installed skills
+• /mcp — MCP server status
+• /cron — Scheduled tasks
 
 <b>💡 Usage</b>
-• Text → Selected model responds
-• Send image → Analyze or edit (👁 vision models)
-• Send PDF/document → Content analysis
-• Send video → Frame extraction analysis
-• Supported features vary by model (shown on selection)
+• Text → AI responds using selected model
+• Image → Vision analysis (👁 vision models)
+• PDF/document → Content analysis
+• Audio/voice → Speech-to-text transcription (STT)
+• Video → Frame extraction analysis
+• ZIP → Skill installation or content analysis
 
-<b>🔧 Available Tools</b> (🔧 tool-supported models)
-• 🔍 Web search (DuckDuckGo)
-• 💻 Code execution (Python/Node.js/Shell)
-• 🌐 Fetch URL content
-• 🕐 Current date/time
-• 🧮 Math calculator
-• 📁 File read/write (entire server)
-• 🖥 Shell command execution
-• 🔀 Git repository management
-• 📊 Process/system monitoring
-• 🎨 Image generation (ComfyUI)
-• ✏️ Image editing (ComfyUI, vision models)
-• 📝 Obsidian note management (read/create/search/edit)
+<b>🔧 Available Tools</b> (tool-supported models)
+• 🔍 Web search  • 🌐 URL fetch  • 🕐 Date/time
+• 💻 Code execution (Python/Node/Shell)
+• 📁 File read/write  • 🖥 Shell commands
+• 🔀 Git  • 📊 Process manager  • 🖥 tmux
+• 🧮 Calculator  • 🎨 Image gen/edit (ComfyUI)
+• 🧠 Memory (long-term + daily episodic search)
+• 📋 Cron scheduler  • 🛠 Skill creator
+• 🎤 Whisper STT  • 🔄 Self-update
+• 📝 Obsidian notes  • 📡 MCP tools
 """
 
 
@@ -351,6 +366,13 @@ async def compress_context(uid: int, user) -> str:
         summary = await summarize_context(model, old_text)
     except Exception as e:
         return f"Compression failed: {e}"
+
+    # Save compressed content to daily memory
+    try:
+        from openlama.core.memory import save_daily_entry
+        save_daily_entry(summary, source="context_compression")
+    except Exception:
+        pass
 
     compressed = [{"u": "[Context Summary]", "a": summary}] + recent_items
     save_context(uid, compressed)
@@ -496,6 +518,11 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
 async def _handle_profile_setup(update: Update, user: UserState, text: str) -> bool:
     """Handle profile setup flow: language -> user info -> agent identity -> AI refinement."""
     uid = user.telegram_id
+
+    # If profile is already complete (e.g. set via CLI), clear stale state
+    if user.state.startswith("await_profile") and is_profile_setup_done():
+        update_user(uid, state="")
+        return False
 
     if user.state == "await_profile_language":
         from openlama.core.onboarding import LANGUAGES
@@ -645,6 +672,14 @@ async def _maybe_summarize(
     try:
         summary = await summarize_context(model, old_text)
         logger.info("compressed %d turns -> summary (%d chars), keeping %d recent", len(old_items), len(summary), len(recent_items))
+
+        # Save compressed content to daily memory
+        try:
+            from openlama.core.memory import save_daily_entry
+            save_daily_entry(summary, source="context_compression")
+        except Exception as me:
+            logger.warning("failed to save daily memory: %s", me)
+
         return recent_items, summary
     except Exception as e:
         logger.error("summarize failed: %s", e)
@@ -660,9 +695,21 @@ async def _do_chat(
 ):
     """Core Telegram chat function -- streaming + tools + think mode.
 
-    Uses streaming via Telegram message edits for the initial response,
-    then delegates tool calls to the core agent.
+    Uses per-user lock to queue concurrent messages.
     """
+    uid = user.telegram_id
+    lock = _get_user_lock(uid)
+    async with lock:
+        await _do_chat_inner(update, user, user_text, images, file_context)
+
+
+async def _do_chat_inner(
+    update: Update,
+    user: UserState,
+    user_text: str,
+    images: Optional[list[str]] = None,
+    file_context: str = "",
+):
     uid = user.telegram_id
     model = user.selected_model
 
@@ -683,12 +730,24 @@ async def _do_chat(
 
     # Context -- auto-compact based on num_ctx
     ctx_items = load_context(uid)
-    ctx_items, summary = await _maybe_summarize(
-        uid, model, ctx_items,
-        num_ctx=settings.num_ctx,
-        system_prompt=system_prompt,
-        user_text=full_text,
-    )
+    notify_msg = None
+    if len(ctx_items) >= 3:
+        pre_len = len(ctx_items)
+        ctx_items, summary = await _maybe_summarize(
+            uid, model, ctx_items,
+            num_ctx=settings.num_ctx,
+            system_prompt=system_prompt,
+            user_text=full_text,
+        )
+        if summary and len(ctx_items) < pre_len:
+            try:
+                notify_msg = await update.message.reply_text(
+                    f"🗜 Context auto-compressed: {pre_len} → {len(ctx_items) + 1} turns"
+                )
+            except Exception:
+                pass
+    else:
+        summary = ""
 
     # Tools -- filter based on model capabilities
     tools = None
@@ -789,9 +848,44 @@ async def _do_chat(
             answer = "Response is empty."
 
     except Exception as e:
-        logger.error("chat error: %s", e, exc_info=True)
-        await placeholder.edit_text(f"Model response failed: {e}")
-        return
+        err_str = str(e).lower()
+        # Auto-trim on context overflow (400 errors)
+        if "400" in str(e) and len(messages) > 3:
+            logger.warning("Telegram: context overflow, trimming and retrying")
+            for retry in range(3):
+                system_msg = messages[0]
+                user_msg = messages[-1]
+                context_msgs = messages[1:-1]
+                if len(context_msgs) <= 2:
+                    messages = [system_msg, user_msg]
+                    save_context(uid, [])
+                    ctx_items = []
+                else:
+                    half = max(2, len(context_msgs) // 2)
+                    context_msgs = context_msgs[half:]
+                    messages = [system_msg] + context_msgs + [user_msg]
+                    keep = len(context_msgs) // 2
+                    ctx_items = ctx_items[-keep:] if keep > 0 else []
+                    save_context(uid, ctx_items)
+
+                try:
+                    await placeholder.edit_text("🔄 Retrying with trimmed context...")
+                    gen = chat_stream(model, messages, images=images, settings=settings, tools=tools, think=think)
+                    result = await stream_response_to_message(placeholder, gen, think_mode=think)
+                    answer = result["content"]
+                    prompt_tokens = result.get("prompt_tokens", 0)
+                    completion_tokens = result.get("completion_tokens", 0)
+                    tool_calls = []
+                    break
+                except Exception:
+                    if retry == 2:
+                        logger.error("chat error after retries: %s", e, exc_info=True)
+                        await placeholder.edit_text(f"Model response failed: {e}")
+                        return
+        else:
+            logger.error("chat error: %s", e, exc_info=True)
+            await placeholder.edit_text(f"Model response failed: {e}")
+            return
 
     # Save context — include tool call history if any
     tool_names = []
@@ -807,7 +901,7 @@ async def _do_chat(
     if images:
         ctx_user = f"[image] {user_text}"
 
-    ctx_entry = {"u": ctx_user, "a": ctx_answer}
+    ctx_entry = {"u": ctx_user[:10000], "a": ctx_answer[:10000]}
     ctx_items.append(ctx_entry)
     save_context(uid, ctx_items)
 
@@ -818,8 +912,10 @@ async def _do_chat(
             # Use streaming prompt_tokens (base context, excludes tool rounds)
             # This is the actual token count Ollama used for the initial request
             base_prompt = result.get("prompt_tokens", 0) if result else 0
+            base_completion = result.get("completion_tokens", 0) if result else 0
             if base_prompt > 0:
-                status_bar = build_context_bar(base_prompt, settings.num_ctx, len(ctx_items))
+                context_used = base_prompt + base_completion
+                status_bar = build_context_bar(context_used, settings.num_ctx, len(ctx_items))
             else:
                 # Fallback to estimation
                 ctx_est = _estimate_messages_tokens(final_system, ctx_items)
@@ -879,7 +975,7 @@ async def login(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def logout(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
     update_user(uid, auth_until=0, state="")
-    clear_context(uid)
+    _save_and_clear(uid)
     await update.message.reply_text(
         "🔓 Logged out",
         reply_markup=main_menu_keyboard(False),
@@ -1091,7 +1187,7 @@ async def status_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def clear_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = update.effective_user.id
-    clear_context(uid)
+    _save_and_clear(uid)
     await update.message.reply_text(
         "🗑 Context cleared",
         reply_markup=main_menu_keyboard(is_authed(get_user(uid))),
@@ -1122,8 +1218,17 @@ async def export_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 # ══════════════════════════════════════════════════════════
-# Message handlers
+# Message handlers (with per-user queue)
 # ══════════════════════════════════════════════════════════
+
+_user_locks: dict[int, asyncio.Lock] = {}
+
+
+def _get_user_lock(uid: int) -> asyncio.Lock:
+    if uid not in _user_locks:
+        _user_locks[uid] = asyncio.Lock()
+    return _user_locks[uid]
+
 
 async def on_text(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not update.message or not update.effective_user:
@@ -1292,9 +1397,18 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await _do_chat(update, user, prompt, images=[image_b64])
 
     elif file_type == "audio":
-        audio_b64 = process_audio(file_bytes)
-        prompt = caption or "Analyze this audio."
-        await _do_chat(update, user, prompt, images=[audio_b64])
+        from openlama.utils.file_processor import transcribe_audio
+        doc = update.message.document
+        audio_fname = doc.file_name if doc else "audio.ogg"
+        await update.message.reply_text("🎤 Transcribing audio...")
+        transcript = transcribe_audio(file_bytes, audio_fname)
+        if transcript.startswith("["):
+            # Error or no speech
+            await update.message.reply_text(transcript)
+            return
+        file_context = f"[Voice/Audio transcription]\n{transcript}"
+        prompt = caption or transcript
+        await _do_chat(update, user, prompt, file_context=file_context if caption else "")
 
     elif file_type == "video":
         frames = process_video(file_bytes, max_frames=8)
@@ -1308,8 +1422,73 @@ async def on_media(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("Unsupported file format.")
 
 
+async def _handle_archive(update: Update, user, file_bytes: bytes, fname: str, caption: str):
+    """Handle ZIP archive uploads — extract and check for skills or pass contents to AI."""
+    from openlama.utils.file_processor import extract_archive
+    from openlama.core.skills import save_skill, _skills_dir
+    import shutil
+
+    status, extracted_dir = extract_archive(file_bytes, fname)
+    if extracted_dir is None:
+        await update.message.reply_text(f"Archive error: {status}")
+        return
+
+    try:
+        # Check for SKILL.md files — install as skills
+        skill_files = list(extracted_dir.rglob("SKILL.md"))
+        if skill_files:
+            skills_base = _skills_dir()
+            skills_base.mkdir(parents=True, exist_ok=True)
+            installed = []
+            for sf in skill_files:
+                skill_dir = sf.parent
+                skill_name = skill_dir.name
+                dest = skills_base / skill_name
+                if dest.exists():
+                    shutil.rmtree(dest)
+                shutil.copytree(skill_dir, dest)
+                installed.append(skill_name)
+
+            from openlama.core.skills import _invalidate_cache
+            _invalidate_cache()
+
+            names = ", ".join(installed)
+            await update.message.reply_text(
+                f"✅ Skill{'s' if len(installed) > 1 else ''} installed: {names}\n"
+                f"Use /skills to see all installed skills."
+            )
+            return
+
+        # No skills found — list contents and pass to AI
+        all_files = [str(f.relative_to(extracted_dir)) for f in extracted_dir.rglob("*") if f.is_file()]
+        file_list = "\n".join(f"  • {f}" for f in all_files[:50])
+
+        # Read text files for context
+        text_parts = []
+        for f in extracted_dir.rglob("*"):
+            if f.is_file() and f.stat().st_size < 100000:
+                try:
+                    content = f.read_text(encoding="utf-8")
+                    rel = f.relative_to(extracted_dir)
+                    text_parts.append(f"[{rel}]\n```\n{content[:10000]}\n```")
+                except (UnicodeDecodeError, Exception):
+                    continue
+            if len(text_parts) >= 10:
+                break
+
+        file_context = f"[Archive: {fname}]\nFiles ({len(all_files)}):\n{file_list}"
+        if text_parts:
+            file_context += "\n\n" + "\n\n".join(text_parts)
+
+        prompt = caption or "Analyze the contents of this archive."
+        await _do_chat(update, user, prompt, file_context=file_context[:50000])
+
+    finally:
+        shutil.rmtree(extracted_dir, ignore_errors=True)
+
+
 async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle non-image documents (PDF, text, code files)."""
+    """Handle non-image documents (PDF, text, code, archives)."""
     if not update.message or not update.effective_user or not update.message.document:
         return
 
@@ -1384,7 +1563,20 @@ async def on_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await on_media(update, context)
         return
 
-    # Unknown file type -- try as text
+    if file_type == "archive":
+        await _handle_archive(update, user, file_bytes, fname, caption)
+        return
+
+    # Unknown file type -- check if binary or text
+    from openlama.utils.file_processor import is_binary
+    if is_binary(file_bytes):
+        await update.message.reply_text(
+            f"Unsupported binary file: {fname}\n\n"
+            "Supported formats: images, PDF, text/code, audio, video, ZIP archives."
+        )
+        return
+
+    # Likely text — try to decode
     try:
         text_content = file_bytes.decode("utf-8", errors="replace")[:30000]
         file_context = f"[File: {fname}]\n```\n{text_content}\n```"
@@ -1442,7 +1634,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # ── Clear context ──
     if data == "clear_ctx":
-        clear_context(uid)
+        _save_and_clear(uid)
         await q.edit_message_text("🗑 Context cleared", reply_markup=main_menu_keyboard(True))
         return
 
@@ -1695,7 +1887,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if data == "cmd:logout":
         update_user(uid, auth_until=0, state="")
-        clear_context(uid)
+        _save_and_clear(uid)
         await q.edit_message_text("🔓 Logged out", reply_markup=main_menu_keyboard(False))
         return
 
