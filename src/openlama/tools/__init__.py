@@ -25,9 +25,9 @@ def init_tools():
     import openlama.tools.mcp_manager
     import openlama.tools.cron_tool
     import openlama.tools.update_tool
-    # Unix-only tools — tmux and process_manager require POSIX shell
+    import openlama.tools.process_manager
+    # tmux is Unix-only (no Windows equivalent)
     if not _IS_WINDOWS:
-        import openlama.tools.process_manager
         import openlama.tools.tmux_tool
     # Conditional tools — whisper: auto-detect if faster-whisper is installed
     stt_config = get_config("stt_enabled", "auto").lower()
