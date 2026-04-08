@@ -247,6 +247,22 @@ async def get_model_display_map(models: list[str]) -> dict[str, str]:
 
 # ── Chat ──────────────────────────────────────────────────
 
+def _normalize_keep_alive(value: str) -> str:
+    """Ensure keep_alive has a time unit. Ollama requires '60s', '5m', etc."""
+    v = str(value).strip()
+    if not v:
+        return "30m"
+    # Already has unit (s, m, h) or is "0"
+    if v[-1] in ("s", "m", "h") or v == "0":
+        return v
+    # Pure number — treat as seconds
+    try:
+        int(v)
+        return v + "s"
+    except ValueError:
+        return v
+
+
 def _build_options(settings: ModelSettings) -> dict:
     opts: dict[str, Any] = {}
     defaults = DEFAULT_MODEL_PARAMS
@@ -292,7 +308,7 @@ async def chat_with_ollama(
         if opts:
             payload["options"] = opts
         if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = settings.keep_alive
+            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
     if tools:
         payload["tools"] = tools
     if think:
@@ -326,7 +342,7 @@ async def chat_with_ollama_full(
         if opts:
             payload["options"] = opts
         if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = settings.keep_alive
+            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
     if tools:
         payload["tools"] = tools
     if think:
@@ -335,7 +351,10 @@ async def chat_with_ollama_full(
     timeout_sec = get_config_int("ollama_timeout_sec", 120)
     async with httpx.AsyncClient(timeout=timeout_sec) as client:
         r = await client.post(f"{get_config('ollama_base')}/api/chat", json=payload)
-        r.raise_for_status()
+        if r.status_code != 200:
+            error_body = r.text[:500]
+            logger.error("Ollama API error %d: %s", r.status_code, error_body)
+            r.raise_for_status()
         data = r.json()
 
     msg = data.get("message") or {}
@@ -369,7 +388,7 @@ async def chat_stream(
         if opts:
             payload["options"] = opts
         if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = settings.keep_alive
+            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
     if tools:
         payload["tools"] = tools
     if think:

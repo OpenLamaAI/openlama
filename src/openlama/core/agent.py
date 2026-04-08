@@ -112,6 +112,69 @@ async def handle_tool_calls(
     return "Maximum tool call iterations reached.", image_paths, total_usage
 
 
+async def _call_with_auto_trim(
+    model: str, messages: list[dict], settings, tools, think: bool,
+    uid: int, ctx_items: list[dict],
+) -> dict:
+    """Call Ollama with automatic context trimming on overflow.
+
+    If the request exceeds num_ctx (400 error), progressively removes
+    the oldest context messages and retries. If still failing after
+    trimming, compresses remaining context and retries once more.
+    """
+    last_error = None
+    for attempt in range(4):
+        try:
+            return await chat_with_ollama_full(
+                model, messages, settings=settings, tools=tools, think=think,
+            )
+        except Exception as e:
+            last_error = e
+            err_str = str(e).lower()
+
+            # Only retry on context-related 400 errors
+            is_context_error = "400" in str(e) and any(
+                kw in err_str for kw in ("context", "too long", "exceed", "token", "length")
+            )
+
+            if not is_context_error and "400" in str(e):
+                # 400 but not context-related — might be malformed request.
+                # Try once without tools (tools can cause 400 on some models)
+                if tools and attempt == 0:
+                    logger.warning("400 error, retrying without tools: %s", err_str[:200])
+                    tools = None
+                    continue
+                raise
+
+            if not is_context_error:
+                raise
+
+            system_msg = messages[0]
+            user_msg = messages[-1]
+            context_msgs = messages[1:-1]
+
+            logger.warning(
+                "Context overflow (attempt %d, %d context msgs). Trimming...",
+                attempt + 1, len(context_msgs),
+            )
+
+            if len(context_msgs) <= 2:
+                messages = [system_msg, user_msg]
+                save_context(uid, [])
+                continue
+
+            half = max(2, len(context_msgs) // 2)
+            context_msgs = context_msgs[half:]
+            messages = [system_msg] + context_msgs + [user_msg]
+
+            keep_turns = len(context_msgs) // 2
+            if len(ctx_items) > keep_turns:
+                ctx_items = ctx_items[-keep_turns:] if keep_turns > 0 else []
+                save_context(uid, ctx_items)
+
+    raise last_error or RuntimeError("Chat failed after retries")
+
+
 async def chat(request: ChatRequest) -> ChatResponse:
     """Main chat entry point — channel independent."""
     uid = request.user_id
@@ -167,8 +230,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     # Get tools
     tools = format_tools_for_ollama(admin=True)
 
-    # Call model
-    resp = await chat_with_ollama_full(model, messages, settings=settings, tools=tools, think=think)
+    # Call model — auto-trim context on overflow (400 error)
+    resp = await _call_with_auto_trim(model, messages, settings, tools, think, uid, ctx_items)
 
     usage = TokenUsage(
         prompt_tokens=resp.get("prompt_tokens", 0),
@@ -185,15 +248,19 @@ async def chat(request: ChatRequest) -> ChatResponse:
         usage.prompt_tokens += tool_usage.prompt_tokens
         usage.completion_tokens += tool_usage.completion_tokens
 
-    # Save context
+    # Save context (generous limit to avoid DB bloat while preserving detail)
     answer = content.strip() if content else ""
-    ctx_entry = {"u": request.text[:2000], "a": answer[:2000]}
+    ctx_entry = {"u": request.text[:10000], "a": answer[:10000]}
     ctx_items.append(ctx_entry)
     save_context(uid, ctx_items)
 
-    # Build context bar
-    est_tokens = _estimate_messages_tokens(system_prompt, ctx_items)
-    context_bar = build_context_bar(est_tokens, settings.num_ctx, len(ctx_items))
+    # Build context bar using Ollama's actual token counts
+    # prompt_tokens from the initial call = full context window usage
+    # completion_tokens = tokens generated, which become part of next prompt
+    base_prompt = resp.get("prompt_tokens", 0)
+    base_completion = resp.get("completion_tokens", 0)
+    context_used = base_prompt + base_completion if base_prompt > 0 else _estimate_messages_tokens(system_prompt, ctx_items)
+    context_bar = build_context_bar(context_used, settings.num_ctx, len(ctx_items))
     total_req = usage.prompt_tokens + usage.completion_tokens
     if total_req > 0:
         context_bar += f"\n\U0001f4ac This request: {usage.prompt_tokens:,} in + {usage.completion_tokens:,} out = {total_req:,}"
