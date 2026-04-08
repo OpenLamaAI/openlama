@@ -1,15 +1,16 @@
-# ── Environment & Secrets ──
+# Environment & Secrets
 .env
 .env.local
 .env.*.local
 
-# ── Database ──
+# Database
 *.db
 *.db-journal
+*.db-wal
 *.sqlite
 *.sqlite3
 
-# ── Python ──
+# Python
 __pycache__/
 *.py[cod]
 *$py.class
@@ -20,38 +21,56 @@ dist/
 build/
 *.whl
 
-# ── Virtual Environment ──
+# Virtual Environment
 .venv/
 venv/
 ENV/
 
-# ── Testing / Lint Cache ──
+# Testing / Lint Cache
 .pytest_cache/
 .ruff_cache/
 .mypy_cache/
 .coverage
 htmlcov/
 
-# ── IDE ──
+# IDE
 .vscode/
 .idea/
 *.swp
 *.swo
 *~
 
-# ── OS ──
+# OS
 .DS_Store
 Thumbs.db
 
-# ── Uploads & Temp ──
+# Uploads & Temp
 tmp_uploads/
 *.tmp
 
-# ── Logs ──
+# Logs
 *.log
 
-# ── Docs (계획/내부 문서 — 코드만 관리) ──
+# Config (runtime generated)
+*.pid
+
+# Docs (internal planning docs)
 docs/
 
-# ── Config (런타임 생성) ──
-tob.pid
+# Claude Code
+.claude/
+
+# Publish script (contains PyPI token)
+/publish.sh
+
+# Legacy root-level files (migrated to src/openlama/)
+/auth.py
+/bot.py
+/config.py
+/database.py
+/ollama_client.py
+/run.sh
+/requirements.txt
+/handlers/
+/tools/
+/utils/
