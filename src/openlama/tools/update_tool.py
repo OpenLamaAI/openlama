@@ -62,10 +62,13 @@ async def _do_update() -> str:
             method = "uv"
 
     if not updated:
-        for cmd in [
+        pip_cmds = [
             [sys.executable, "-m", "pip", "install", "--upgrade", "openlama"],
-            ["pip3", "install", "--upgrade", "openlama"],
-        ]:
+        ]
+        # pip3 on Unix, pip on Windows
+        pip_name = "pip" if sys.platform == "win32" else "pip3"
+        pip_cmds.append([pip_name, "install", "--upgrade", "openlama"])
+        for cmd in pip_cmds:
             if not shutil.which(cmd[0]):
                 continue
             try:

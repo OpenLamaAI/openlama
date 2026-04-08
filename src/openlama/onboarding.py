@@ -101,7 +101,8 @@ def _step_ollama():
             pass
         console.print("  ⚠ Ollama installed but server not running")
         console.print("  Starting Ollama server...")
-        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        popen_kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
+        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_kw)
         for _ in range(15):
             time.sleep(1)
             try:
@@ -129,11 +130,21 @@ def _step_ollama():
         return
     elif sys.platform == "darwin" and shutil.which("brew"):
         subprocess.run(["brew", "install", "ollama"], check=True)
+    elif shutil.which("curl"):
+        subprocess.run(["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"], check=True)
     else:
-        subprocess.run(["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"], check=True)
+        console.print("  [red]✗ curl not found. Install Ollama manually: https://ollama.com[/red]")
+        return
 
     console.print("  ✓ Ollama installed")
-    subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    popen_kwargs = {}
+    if sys.platform == "win32":
+        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
+    subprocess.Popen(
+        ["ollama", "serve"],
+        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+        **popen_kwargs,
+    )
     time.sleep(3)
     console.print("  ✓ Ollama server started")
 
@@ -626,17 +637,23 @@ def _detect_obsidian_vaults() -> list[str]:
         except Exception:
             pass
 
-    # Method 2: Check Obsidian config file
-    obsidian_config = Path.home() / "Library" / "Application Support" / "obsidian" / "obsidian.json"
-    if not obsidian_config.exists():
-        # Linux
-        obsidian_config = Path.home() / ".config" / "obsidian" / "obsidian.json"
-    if obsidian_config.exists():
+    # Method 2: Check Obsidian config file (platform-specific paths)
+    candidates = []
+    if sys.platform == "darwin":
+        candidates.append(Path.home() / "Library" / "Application Support" / "obsidian" / "obsidian.json")
+    elif sys.platform == "win32":
+        appdata = Path.home() / "AppData" / "Roaming" / "obsidian" / "obsidian.json"
+        candidates.append(appdata)
+    candidates.append(Path.home() / ".config" / "obsidian" / "obsidian.json")  # Linux / fallback
+
+    for obsidian_config in candidates:
+        if not obsidian_config.exists():
+            continue
         try:
             import json
             data = json.loads(obsidian_config.read_text(encoding="utf-8"))
             vaults = data.get("vaults", {})
-            return [v.get("path", "").split("/")[-1] for v in vaults.values() if v.get("path")]
+            return [Path(v.get("path", "")).name for v in vaults.values() if v.get("path")]
         except Exception:
             pass
 

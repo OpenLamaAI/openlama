@@ -223,9 +223,9 @@ async def fix_ollama_version():
         )
         await proc.wait()
         return proc.returncode == 0
-    elif sys.platform == "linux":
-        proc = await asyncio.create_subprocess_shell(
-            "curl -fsSL https://ollama.com/install.sh | sh",
+    elif sys.platform != "win32" and shutil.which("bash"):
+        proc = await asyncio.create_subprocess_exec(
+            "bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

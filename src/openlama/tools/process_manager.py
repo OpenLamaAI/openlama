@@ -73,8 +73,9 @@ async def _execute(args: dict) -> str:
     if action == "top":
         if _win:
             return await _run_cmd("wmic cpu get loadpercentage")
-        # One-shot snapshot
-        return await _run_cmd("top -l 1 -n 15 2>/dev/null || top -b -n 1 | head -30")
+        if sys.platform == "darwin":
+            return await _run_cmd("top -l 1 -n 15 -s 0")
+        return await _run_cmd("top -b -n 1 | head -30")
 
     if action == "df":
         if _win:
@@ -97,13 +98,13 @@ async def _execute(args: dict) -> str:
         return await _run_cmd("uptime")
 
     if action == "netstat":
-        extra = target or "-tlnp"
         if _win:
             return await _run_cmd(f"netstat {target}" if target else "netstat -ano")
-        return await _run_cmd(
-            f"netstat {extra} 2>/dev/null || "
-            f"lsof -i -P -n 2>/dev/null | head -50"
-        )
+        if sys.platform == "darwin":
+            # macOS netstat doesn't support -tlnp
+            return await _run_cmd("lsof -i -P -n | head -50")
+        extra = target or "-tlnp"
+        return await _run_cmd(f"netstat {extra} 2>/dev/null || lsof -i -P -n | head -50")
 
     if action == "lsof":
         if _win:

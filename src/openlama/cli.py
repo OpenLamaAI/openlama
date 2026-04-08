@@ -308,9 +308,9 @@ def update(ollama_only, self_only):
             try:
                 if sys.platform == "darwin" and shutil.which("brew"):
                     subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True)
-                elif sys.platform == "linux":
+                elif sys.platform != "win32" and shutil.which("bash"):
                     subprocess.run(
-                        ["sh", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
+                        ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
                         capture_output=True, text=True,
                     )
                 elif sys.platform == "win32":

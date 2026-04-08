@@ -2,6 +2,7 @@
 
 import asyncio
 import os
+import shutil
 
 from openlama.config import get_config_int
 from openlama.tools.registry import register_tool
@@ -9,6 +10,8 @@ from openlama.tools.registry import register_tool
 
 async def _run_git(args: list[str], cwd: str = None, timeout: int = None) -> str:
     """Run a git command and return output."""
+    if not shutil.which("git"):
+        return "git is not installed. Please install Git: https://git-scm.com"
     if timeout is None:
         timeout = get_config_int("code_execution_timeout", 30)
     cmd = ["git"] + args

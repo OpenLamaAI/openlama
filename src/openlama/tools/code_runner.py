@@ -18,8 +18,11 @@ async def _execute(args: dict) -> str:
 
     timeout = get_config_int("code_execution_timeout", 30)
 
+    # Resolve python command: python3 on Unix, python on Windows
+    py_cmd = "python" if sys.platform == "win32" else "python3"
+
     runners = {
-        "python": ("python3", ".py"),
+        "python": (py_cmd, ".py"),
         "node": ("node", ".js"),
         "nodejs": ("node", ".js"),
         "javascript": ("node", ".js"),
@@ -35,18 +38,15 @@ async def _execute(args: dict) -> str:
 
     cmd, ext = runners[language]
 
-    # Shell/bash: check availability on Windows
-    if ext in (".sh", ".zsh") and sys.platform == "win32":
-        if not shutil.which(cmd):
-            # Try bash (e.g. Git Bash / WSL)
-            if shutil.which("bash"):
-                cmd = "bash"
-            else:
-                return (
-                    "Shell scripts require bash. "
-                    "Install Git Bash or WSL on Windows, "
-                    "or use Python instead."
-                )
+    # Check if the runner exists
+    if not shutil.which(cmd):
+        # Fallback attempts
+        if cmd == py_cmd and shutil.which(sys.executable):
+            cmd = sys.executable
+        elif ext in (".sh", ".zsh") and shutil.which("bash"):
+            cmd = "bash"
+        else:
+            return f"'{cmd}' not found. Please install it or use a different language."
 
     try:
         with tempfile.NamedTemporaryFile(mode="w", suffix=ext, delete=False) as f:

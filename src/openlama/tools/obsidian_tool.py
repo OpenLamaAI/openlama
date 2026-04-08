@@ -47,7 +47,12 @@ async def _run_obsidian(args: list[str], timeout: int = None) -> str:
         return "\n".join(parts) if parts else "(empty result)"
 
     except FileNotFoundError:
-        return "obsidian-cli is not installed. Install with: brew install obsidian-cli"
+        return (
+            "obsidian-cli is not installed. Install with:\n"
+            "  macOS/Linux: brew tap yakitrak/yakitrak && brew install obsidian-cli\n"
+            "  Go:          go install github.com/Yakitrak/obsidian-cli@latest\n"
+            "  Or run:      openlama config obsidian install"
+        )
     except Exception as e:
         return f"Obsidian CLI execution error: {e}"
 

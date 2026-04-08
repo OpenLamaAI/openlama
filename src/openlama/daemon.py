@@ -43,15 +43,18 @@ def start_daemon():
         import subprocess
         log_fd = open(LOG_FILE, "a", encoding="utf-8")
         CREATE_NO_WINDOW = 0x08000000
-        proc = subprocess.Popen(
-            [sys.executable, "-m", "openlama.cli", "start"],
-            stdout=log_fd,
-            stderr=log_fd,
-            creationflags=CREATE_NO_WINDOW,
-        )
-        PID_FILE.write_text(str(proc.pid))
-        print(f"🟢 openlama daemon started (PID {proc.pid})")
-        print(f"   Logs: {LOG_FILE}")
+        try:
+            proc = subprocess.Popen(
+                [sys.executable, "-m", "openlama.cli", "start"],
+                stdout=log_fd,
+                stderr=log_fd,
+                creationflags=CREATE_NO_WINDOW,
+            )
+            PID_FILE.write_text(str(proc.pid))
+            print(f"🟢 openlama daemon started (PID {proc.pid})")
+            print(f"   Logs: {LOG_FILE}")
+        finally:
+            log_fd.close()
         return
 
     # Unix: fork

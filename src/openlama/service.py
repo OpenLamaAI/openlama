@@ -32,13 +32,19 @@ def uninstall():
 def _install_windows():
     bin_path = _find_openlama_bin()
     task_name = "openlama"
-    cmd = f'schtasks /create /tn "{task_name}" /tr "\"{bin_path}\" start" /sc onlogon /rl highest /f'
-    subprocess.run(cmd, shell=True)
+    subprocess.run([
+        "schtasks", "/create",
+        "/tn", task_name,
+        "/tr", f'"{bin_path}" start',
+        "/sc", "onlogon",
+        "/rl", "highest",
+        "/f",
+    ])
     print(f"✅ Service registered via Task Scheduler: {task_name}")
     print("   openlama will start on logon")
 
 def _uninstall_windows():
-    subprocess.run('schtasks /delete /tn "openlama" /f', shell=True)
+    subprocess.run(["schtasks", "/delete", "/tn", "openlama", "/f"])
     print("🗑 Task Scheduler entry removed")
 
 def _install_launchd():
