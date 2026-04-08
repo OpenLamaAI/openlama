@@ -50,6 +50,7 @@ def _install_windows():
 def _uninstall_windows():
     subprocess.run(["schtasks", "/delete", "/tn", "openlama", "/f"])
     print("🗑 Task Scheduler entry removed")
+    print("   Note: If openlama is currently running, stop it with 'openlama stop'")
 
 def _install_launchd():
     plist_dir = Path.home() / "Library" / "LaunchAgents"
@@ -161,5 +162,6 @@ def _uninstall_termux():
     if script.exists():
         script.unlink()
         print("🗑 Termux:Boot script removed")
+        print("   Note: If openlama is currently running, stop it with 'openlama stop'")
     else:
         print("No boot script found")

@@ -65,8 +65,9 @@ def main(ctx):
       openlama setup                    Interactive setup wizard
       openlama start                    Start Telegram bot (foreground)
       openlama start -d                 Start as background daemon
-      openlama start --install-service  Register as OS service (auto-start on boot)
-      openlama chat                     Interactive terminal chat (TUI)
+      openlama start --install-service    Register as OS service (auto-start on boot)
+      openlama start --uninstall-service Remove OS service registration
+      openlama chat                      Interactive terminal chat (TUI)
 
     \b
     Daemon management:
