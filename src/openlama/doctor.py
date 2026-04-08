@@ -297,7 +297,9 @@ async def check_ollama_models() -> CheckResult:
                 "Ollama models", "warn",
                 f"Default model '{default}' not found. {len(models)} models available.",
             )
-        return CheckResult("Ollama models", "ok", f"{len(models)} models available")
+        model_list = ", ".join(models[:5])
+        suffix = f" (+{len(models) - 5} more)" if len(models) > 5 else ""
+        return CheckResult("Ollama models", "ok", f"{model_list}{suffix}")
     except Exception as e:
         return CheckResult("Ollama models", "fail", f"Error: {e}")
 

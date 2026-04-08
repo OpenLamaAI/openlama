@@ -18,10 +18,22 @@ from openlama.config import DATA_DIR, _DEFAULTS
 console = Console()
 
 
+def _get_existing(key: str) -> str:
+    """Get existing config value from DB (for re-setup)."""
+    try:
+        from openlama.database import init_db, get_setting
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        init_db()
+        return get_setting(key) or ""
+    except Exception:
+        return ""
+
+
 def run_setup():
     """Run the interactive setup wizard."""
     console.print(Panel(
-        "  Quick setup. Press Ctrl+C to cancel.",
+        "  Quick setup. Press Ctrl+C to cancel.\n"
+        "  [dim]Leave blank to keep existing value.[/dim]",
         title="🤖 openlama — Personal AI Agent",
         border_style="blue",
     ))
@@ -32,6 +44,8 @@ def run_setup():
         _step_channel()
         _step_password()
         _step_features()
+        _step_stt()
+        _step_obsidian()
     except KeyboardInterrupt:
         console.print("\n\n[yellow]Setup cancelled.[/yellow]")
         sys.exit(1)
@@ -72,7 +86,7 @@ def _save(key: str, value: str):
 
 def _step_ollama():
     """Step 1: Check/install Ollama."""
-    console.print("\n  [bold]● Step 1/5 — Ollama[/bold]\n")
+    console.print("\n  [bold]● Step 1/7 — Ollama[/bold]\n")
 
     if shutil.which("ollama"):
         console.print("  ✓ Ollama is installed")
@@ -170,7 +184,7 @@ def _pull_model_with_progress(model: str):
 
 def _step_models():
     """Step 2: Select and download models."""
-    console.print("\n  [bold]● Step 2/5 — Models[/bold]\n")
+    console.print("\n  [bold]● Step 2/7 — Models[/bold]\n")
 
     RECOMMENDED = [
         ("gemma3:4b",        "3.3 GB", "recommended"),
@@ -234,37 +248,63 @@ def _step_models():
 
 def _step_channel():
     """Step 3: Channel + bot token."""
-    console.print("\n  [bold]● Step 3/5 — Channel[/bold]\n")
+    console.print("\n  [bold]● Step 3/7 — Channel[/bold]\n")
+
+    existing_token = _get_existing("telegram_bot_token")
+    if existing_token:
+        masked = existing_token[:8] + "..." + existing_token[-4:]
+        console.print(f"  [dim]Current token: {masked}[/dim]")
 
     import questionary
     channel = questionary.select("  Select chat channel:", choices=["Telegram", "CLI only"]).ask()
 
     if channel == "Telegram":
-        token = questionary.text("  Enter Telegram bot token (@BotFather):").ask()
-        if token:
-            # Verify token
-            try:
-                r = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
-                if r.status_code == 200:
-                    bot_name = r.json().get("result", {}).get("username", "?")
-                    console.print(f"  ✓ Connected: @{bot_name}")
-                    _save("telegram_bot_token", token)
-                else:
-                    console.print(f"  [red]✗ Invalid token (HTTP {r.status_code})[/red]")
-            except Exception as e:
-                console.print(f"  [red]✗ Connection failed: {e}[/red]")
-                _save("telegram_bot_token", token)  # Save anyway
+        hint = " (blank = keep current)" if existing_token else ""
+        token = questionary.text(f"  Enter Telegram bot token{hint}:").ask()
+        token = (token or "").strip()
+
+        if not token and existing_token:
+            console.print("  ✓ Keeping existing token")
+            return
+
+        if not token:
+            console.print("  [yellow]No token provided[/yellow]")
+            return
+
+        # Verify token
+        try:
+            r = httpx.get(f"https://api.telegram.org/bot{token}/getMe", timeout=5)
+            if r.status_code == 200:
+                bot_name = r.json().get("result", {}).get("username", "?")
+                console.print(f"  ✓ Connected: @{bot_name}")
+                _save("telegram_bot_token", token)
+            else:
+                console.print(f"  [red]✗ Invalid token (HTTP {r.status_code})[/red]")
+        except Exception as e:
+            console.print(f"  [red]✗ Connection failed: {e}[/red]")
+            _save("telegram_bot_token", token)  # Save anyway
     else:
         console.print("  ✓ CLI-only mode selected")
 
 
 def _step_password():
     """Step 4: Admin password."""
-    console.print("\n  [bold]● Step 4/5 — Password[/bold]\n")
+    console.print("\n  [bold]● Step 4/7 — Password[/bold]\n")
+
+    existing_hash = _get_existing("admin_password_hash")
+    if existing_hash:
+        console.print("  [dim]Password already set. Leave blank to keep current.[/dim]")
 
     import questionary
     while True:
         pw = questionary.password("  Set admin password:").ask()
+        pw = (pw or "").strip()
+
+        # Allow skipping if password already exists
+        if not pw and existing_hash:
+            console.print("  ✓ Keeping existing password")
+            return
+
         if not pw or len(pw) < 4:
             console.print("  [red]Password must be at least 4 characters[/red]")
             continue
@@ -381,7 +421,7 @@ def _detect_comfyui() -> dict | None:
 
 def _step_features():
     """Step 5: Optional features."""
-    console.print("\n  [bold]● Step 5/5 — Features[/bold]\n")
+    console.print("\n  [bold]● Step 5/7 — Features[/bold]\n")
 
     import questionary
 
@@ -416,3 +456,216 @@ def _step_features():
     ).ask()
     if sandbox:
         _save("tool_sandbox_path", sandbox)
+
+
+def _step_stt():
+    """Step 6: Speech-to-text (STT) for voice messages."""
+    console.print("\n  [bold]● Step 6/7 — Voice Recognition (STT)[/bold]\n")
+
+    import questionary
+
+    # Check if already installed
+    stt_installed = False
+    try:
+        import faster_whisper
+        stt_installed = True
+    except ImportError:
+        pass
+
+    existing = _get_existing("stt_enabled")
+
+    if stt_installed:
+        console.print("  ✓ faster-whisper is installed")
+        _save("stt_enabled", "true")
+        console.print("  ✓ Voice recognition enabled")
+        return
+
+    console.print("  Voice recognition converts audio/voice messages to text.")
+    console.print("  [dim]Requires: faster-whisper (~200MB download)[/dim]")
+    install = questionary.confirm("  Enable voice recognition (STT)?", default=True).ask()
+
+    if not install:
+        _save("stt_enabled", "false")
+        console.print("  ✓ Voice recognition disabled (can enable later via config)")
+        return
+
+    console.print("\n  Installing faster-whisper...")
+    if _pip_install("faster-whisper"):
+        _save("stt_enabled", "true")
+        console.print("  [green]✓ faster-whisper installed[/green]")
+        console.print("  ✓ Voice recognition enabled")
+    else:
+        _save("stt_enabled", "false")
+        console.print("  [dim]You can install manually: pip install faster-whisper[/dim]")
+
+
+def _step_obsidian():
+    """Step 7: Obsidian vault integration."""
+    console.print("\n  [bold]● Step 7/7 — Obsidian Notes[/bold]\n")
+
+    import questionary
+
+    cli_installed = shutil.which("obsidian-cli") is not None
+    existing_vault = _get_existing("obsidian_vault")
+
+    if cli_installed:
+        console.print("  ✓ obsidian-cli is installed")
+    else:
+        console.print("  Obsidian integration lets the AI read/create/search your notes.")
+        console.print("  [dim]Requires: obsidian-cli (brew install)[/dim]")
+
+    enable = questionary.confirm(
+        "  Enable Obsidian integration?",
+        default=bool(existing_vault or cli_installed),
+    ).ask()
+
+    if not enable:
+        _save("obsidian_vault", "")
+        console.print("  ✓ Obsidian integration disabled")
+        return
+
+    # Install obsidian-cli if needed
+    if not cli_installed:
+        console.print("\n  Installing obsidian-cli...")
+        if _install_obsidian_cli():
+            console.print("  [green]✓ obsidian-cli installed[/green]")
+        else:
+            console.print("  [red]✗ Installation failed[/red]")
+            console.print("  [dim]Install manually: brew tap yakitrak/yakitrak && brew install obsidian-cli[/dim]")
+            console.print("  [yellow]⚠ Obsidian tool will be enabled but commands will fail until CLI is installed.[/yellow]")
+
+    # Configure vault
+    if existing_vault:
+        console.print(f"  [dim]Current vault: {existing_vault}[/dim]")
+
+    # Try to detect vaults
+    detected_vaults = _detect_obsidian_vaults()
+    if detected_vaults:
+        choices = [questionary.Choice(v, value=v) for v in detected_vaults]
+        choices.append(questionary.Choice("  [Custom input]", value="_custom"))
+        if existing_vault:
+            choices.append(questionary.Choice("  [Keep current]", value="_keep"))
+
+        vault = questionary.select("  Select Obsidian vault:", choices=choices).ask()
+
+        if vault == "_keep":
+            console.print(f"  ✓ Keeping vault: {existing_vault}")
+            return
+        elif vault == "_custom":
+            vault = questionary.text(
+                "  Vault name:",
+                default=existing_vault or "",
+            ).ask()
+        # else: vault is the selected name
+    else:
+        vault = questionary.text(
+            "  Vault name (or leave blank to skip):",
+            default=existing_vault or "",
+        ).ask()
+
+    vault = (vault or "").strip()
+    if vault:
+        _save("obsidian_vault", vault)
+        console.print(f"  ✓ Obsidian vault: {vault}")
+    else:
+        _save("obsidian_vault", "")
+        console.print("  [yellow]⚠ No vault configured. Obsidian tool will be active but may return errors.[/yellow]")
+        console.print("  [dim]Set later: openlama config obsidian[/dim]")
+
+
+def _install_obsidian_cli() -> bool:
+    """Install obsidian-cli. Supports brew (macOS/Linux) and go install."""
+    brew = shutil.which("brew")
+
+    if brew:
+        try:
+            # Add tap and install
+            result = subprocess.run(
+                [brew, "tap", "yakitrak/yakitrak"],
+                capture_output=True, timeout=60,
+            )
+            result = subprocess.run(
+                [brew, "install", "obsidian-cli"],
+                capture_output=True, timeout=120,
+            )
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    # Fallback: go install
+    go = shutil.which("go")
+    if go:
+        try:
+            console.print("  [dim]Trying: go install...[/dim]")
+            result = subprocess.run(
+                [go, "install", "github.com/Yakitrak/obsidian-cli@latest"],
+                capture_output=True, timeout=120,
+            )
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, FileNotFoundError):
+            pass
+
+    return False
+
+
+def _detect_obsidian_vaults() -> list[str]:
+    """Try to detect Obsidian vault names from obsidian-cli or filesystem."""
+    # Method 1: obsidian-cli list-vaults (if installed)
+    if shutil.which("obsidian-cli"):
+        try:
+            result = subprocess.run(
+                ["obsidian-cli", "list-vaults"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0 and result.stdout.strip():
+                vaults = [line.strip() for line in result.stdout.strip().split("\n") if line.strip()]
+                if vaults:
+                    return vaults
+        except Exception:
+            pass
+
+    # Method 2: Check Obsidian config file
+    obsidian_config = Path.home() / "Library" / "Application Support" / "obsidian" / "obsidian.json"
+    if not obsidian_config.exists():
+        # Linux
+        obsidian_config = Path.home() / ".config" / "obsidian" / "obsidian.json"
+    if obsidian_config.exists():
+        try:
+            import json
+            data = json.loads(obsidian_config.read_text(encoding="utf-8"))
+            vaults = data.get("vaults", {})
+            return [v.get("path", "").split("/")[-1] for v in vaults.values() if v.get("path")]
+        except Exception:
+            pass
+
+    return []
+
+
+def _pip_install(package: str) -> bool:
+    """Install a pip package into the current Python environment."""
+    python = sys.executable
+    uv = shutil.which("uv")
+
+    # Order: uv (targeting this env) → pip module → pip3
+    methods = []
+    if uv:
+        methods.append([uv, "pip", "install", "--python", python, package])
+    methods.append([python, "-m", "pip", "install", package])
+    if shutil.which("pip3"):
+        methods.append(["pip3", "install", "--target",
+                        str(Path(python).parent.parent / "lib" / f"python{sys.version_info.major}.{sys.version_info.minor}" / "site-packages"),
+                        package])
+
+    for cmd in methods:
+        try:
+            console.print(f"  [dim]Trying: {' '.join(cmd[:4])}...[/dim]")
+            result = subprocess.run(cmd, capture_output=True, timeout=300)
+            if result.returncode == 0:
+                return True
+        except (subprocess.TimeoutExpired, FileNotFoundError, OSError):
+            continue
+
+    console.print("  [red]✗ Installation failed[/red]")
+    return False

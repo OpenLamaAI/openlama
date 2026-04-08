@@ -22,13 +22,18 @@ COMMANDS: list[dict] = [
     {"name": "export", "description": "Export conversation history", "category": "chat"},
     {"name": "profile", "description": "Redo profile setup", "category": "chat"},
 
+    {"name": "compress", "description": "Compress conversation context", "category": "chat"},
+    {"name": "session", "description": "View or extend session", "category": "chat"},
+
     # Model
     {"name": "model", "description": "Show or change current model", "category": "model"},
     {"name": "models", "description": "List available models", "category": "model"},
     {"name": "pull", "description": "Download a new model", "category": "model"},
+    {"name": "rm", "description": "Delete a model", "category": "model"},
 
     # Settings
-    {"name": "settings", "description": "View and modify model parameters", "category": "settings"},
+    {"name": "settings", "description": "Interactive model settings", "category": "settings"},
+    {"name": "set", "description": "Set a model parameter", "category": "settings"},
     {"name": "systemprompt", "description": "View or edit system prompt", "category": "settings"},
     {"name": "think", "description": "Toggle think/reasoning mode", "category": "settings"},
 

@@ -2,25 +2,112 @@
 import click
 from openlama import __version__
 
+def _ver_tuple(v: str) -> tuple[int, ...]:
+    """Parse version string to tuple for comparison. '0.1.28' → (0, 1, 28)"""
+    try:
+        return tuple(int(x) for x in v.split("."))
+    except (ValueError, AttributeError):
+        return (0,)
+
+
+def _check_for_update():
+    """Check if a newer version is available on PyPI. Non-blocking, cached."""
+    import time
+    cache_file = None
+    try:
+        from openlama.config import DATA_DIR
+        cache_file = DATA_DIR / ".update_check"
+        # Check at most once per hour
+        if cache_file.exists():
+            data = cache_file.read_text().strip().split("|")
+            if len(data) == 2:
+                ts, cached_ver = float(data[0]), data[1]
+                if time.time() - ts < 3600:
+                    if cached_ver and _ver_tuple(cached_ver) > _ver_tuple(__version__):
+                        click.echo(f"  ⬆ Update available: v{__version__} → v{cached_ver}  (openlama update)")
+                    return
+
+        import httpx
+        r = httpx.get("https://pypi.org/pypi/openlama/json", timeout=3)
+        if r.status_code == 200:
+            latest = r.json().get("info", {}).get("version", "")
+            if cache_file:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(f"{time.time()}|{latest}")
+            if latest and _ver_tuple(latest) > _ver_tuple(__version__):
+                click.echo(f"  ⬆ Update available: v{__version__} → v{latest}  (openlama update)")
+    except Exception:
+        pass
+
+
 @click.group()
 @click.version_option(version=__version__, prog_name="openlama")
-def main():
+@click.pass_context
+def main(ctx):
     """openlama — Personal AI agent bot powered by Ollama.
 
     \b
     Quick start:
-      openlama setup          Set up Ollama, models, and Telegram
-      openlama start          Run the Telegram bot
-      openlama chat           Chat in the terminal (shared context)
+      openlama setup                    Interactive setup wizard
+      openlama start                    Start Telegram bot (foreground)
+      openlama start -d                 Start as background daemon
+      openlama start --install-service  Register as OS service (auto-start on boot)
+      openlama chat                     Interactive terminal chat (TUI)
 
     \b
-    Management:
-      openlama doctor         Diagnose and fix issues
-      openlama update         Update openlama and Ollama
-      openlama status         Show connection and process status
-      openlama config list    View all settings
+    Daemon management:
+      openlama stop               Stop the daemon
+      openlama restart            Restart the daemon
+      openlama status             Show connection and process status
+      openlama logs               View daemon logs
+      openlama logs --last 50     Show last 50 lines
+      openlama logs --level ERROR Filter by log level
+
+    \b
+    Tools & Extensions:
+      openlama tool list          List all registered tools
+      openlama skill list         List installed skills
+      openlama skill create       Create a new skill interactively
+      openlama skill delete NAME  Delete a skill
+      openlama mcp list           List MCP servers
+      openlama mcp add NAME CMD   Add an MCP server
+      openlama mcp remove NAME    Remove an MCP server
+      openlama cron list          List scheduled tasks
+      openlama cron delete ID     Delete a scheduled task
+
+    \b
+    Configuration:
+      openlama config list        View all settings
+      openlama config get KEY     Get a single setting
+      openlama config set KEY VAL Set a config value
+      openlama config reset       Reset all settings to defaults
+      openlama config stt         Manage voice recognition (STT)
+      openlama config obsidian    Manage Obsidian note integration
+
+    \b
+    Maintenance:
+      openlama doctor             Diagnose and fix issues
+      openlama doctor fix         Auto-fix fixable issues
+      openlama update             Update openlama and Ollama
+      openlama update --self-only   Update openlama only
+      openlama update --ollama-only Update Ollama only
+
+    \b
+    TUI chat commands (inside 'openlama chat'):
+      /help         Show commands         /clear      Clear context
+      /model        Change model          /models     List models
+      /settings     Model parameters      /set K V    Set parameter
+      /think        Toggle think mode     /compress   Compress context
+      /status       Session info          /session    View/extend session
+      /export       Export conversation   /profile    Redo profile setup
+      /pull MODEL   Download model        /rm MODEL   Delete model
+      /skills       List skills           /cron       List tasks
+      /mcp          MCP status            /ollama     Server management
+      /quit         Exit chat
     """
-    pass
+    # Check for updates on every command (except --version itself)
+    if ctx.invoked_subcommand:
+        _check_for_update()
 
 # ─── Core commands ───────────────────────��─────
 
@@ -77,7 +164,20 @@ def restart():
 
 @main.command()
 def chat():
-    """Interactive terminal chat. Shares context with Telegram."""
+    """Interactive terminal chat (TUI). Shares context with Telegram.
+
+    \b
+    Features:
+      • Dynamic slash command search (type / to see all commands)
+      • Rich markdown rendering with syntax highlighting
+      • Bottom toolbar with processing indicator
+      • Command history (persistent across sessions)
+
+    \b
+    Commands: /help, /model, /models, /settings, /set, /think,
+    /clear, /compress, /status, /session, /export, /profile,
+    /pull, /rm, /skills, /cron, /mcp, /ollama, /quit
+    """
     import asyncio
     from openlama.channels.cli.chat import run_chat
     asyncio.run(run_chat())
@@ -112,13 +212,16 @@ def status():
     lines.append(f"  Process:  {pid_info}")
     lines.append(f"")
     ver_str = f" v{ver_info.get('current', '?')}" if ver_info else ""
-    lines.append(f"  Ollama:   {'🟢 Connected' + ver_str if alive else '🔴 Not reachable'}")
-    lines.append(f"  ├─ URL:   {ollama_url}")
+    lines.append(f"  Ollama:   {'Connected' + ver_str if alive else 'Not reachable'}")
+    lines.append(f"    URL:    {ollama_url}")
     if alive:
-        lines.append(f"  ├─ Model: {default_model or '(none)'}")
-        lines.append(f"  ���─ Models: {len(models)} available")
+        lines.append(f"    Default: {default_model or '(none)'}")
+        if models:
+            lines.append(f"    Models:  {', '.join(models)}")
+        else:
+            lines.append(f"    Models:  (none)")
         if ver_info.get("update_available"):
-            lines.append(f"  ⚠  Update: v{ver_info['latest']} available")
+            lines.append(f"    Update:  v{ver_info['latest']} available")
     lines.append(f"")
 
     comfy_enabled = get_config("comfy_enabled", "false").lower() == "true"
@@ -293,6 +396,195 @@ def config_set(key, value):
 def config_reset():
     """Reset all settings to defaults."""
     click.echo("Settings reset. Run 'openlama setup' to reconfigure.")
+
+
+@config.command("stt")
+@click.argument("action", required=False, default="status")
+def config_stt(action):
+    """Manage voice recognition (STT).
+
+    \b
+    Usage:
+      openlama config stt            Show STT status
+      openlama config stt install    Install faster-whisper
+      openlama config stt enable     Enable STT
+      openlama config stt disable    Disable STT
+    """
+    import sys
+    import shutil
+    import subprocess
+    from openlama.database import init_db, set_setting
+    from openlama.config import get_config
+    init_db()
+
+    if action == "status":
+        enabled = get_config("stt_enabled", "false").lower() in ("true", "1")
+        try:
+            import faster_whisper
+            installed = True
+        except ImportError:
+            installed = False
+        click.echo(f"  STT installed:  {'Yes' if installed else 'No'}")
+        click.echo(f"  STT enabled:    {'Yes' if enabled else 'No'}")
+        if not installed:
+            click.echo("  Install: openlama config stt install")
+        return
+
+    if action == "install":
+        click.echo("  Installing faster-whisper...")
+        python = sys.executable
+        uv = shutil.which("uv")
+        installed = False
+
+        methods = []
+        if uv:
+            methods.append([uv, "pip", "install", "--python", python, "faster-whisper"])
+        methods.append([python, "-m", "pip", "install", "faster-whisper"])
+        if shutil.which("pip3"):
+            methods.append(["pip3", "install", "faster-whisper"])
+
+        for cmd in methods:
+            try:
+                click.echo(f"  Trying: {' '.join(cmd[:4])}...")
+                result = subprocess.run(cmd, capture_output=True, timeout=300)
+                if result.returncode == 0:
+                    installed = True
+                    break
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                continue
+
+        if installed:
+            set_setting("stt_enabled", "true")
+            click.echo("  ✓ Installed and enabled")
+        else:
+            click.echo("  ✗ Installation failed — try: uv pip install --python $(which python3) faster-whisper")
+        return
+
+    if action == "enable":
+        set_setting("stt_enabled", "true")
+        click.echo("  ✓ STT enabled")
+        return
+
+    if action == "disable":
+        set_setting("stt_enabled", "false")
+        click.echo("  ✓ STT disabled")
+        return
+
+    click.echo(f"Unknown action: {action}. Use: status, install, enable, disable")
+
+
+@config.command("obsidian")
+@click.argument("args", nargs=-1)
+def config_obsidian(args):
+    """Manage Obsidian note integration.
+
+    \b
+    Usage:
+      openlama config obsidian              Show status
+      openlama config obsidian install      Install obsidian-cli
+      openlama config obsidian vault NAME   Set vault name
+      openlama config obsidian disable      Disable Obsidian integration
+    """
+    action = args[0] if args else "status"
+    import shutil
+    import subprocess
+    from openlama.database import init_db, set_setting
+    from openlama.config import get_config
+    init_db()
+
+    if action == "status":
+        cli_installed = shutil.which("obsidian-cli") is not None
+        vault = get_config("obsidian_vault")
+        click.echo(f"  CLI installed:  {'Yes' if cli_installed else 'No'}")
+        click.echo(f"  Vault:          {vault or '(not set)'}")
+        click.echo(f"  Enabled:        {'Yes' if vault else 'No'}")
+        if not cli_installed:
+            click.echo("  Install CLI: openlama config obsidian install")
+        if not vault:
+            click.echo("  Set vault:   openlama config obsidian vault <name>")
+        return
+
+    if action == "install":
+        click.echo("  Installing obsidian-cli...")
+        brew = shutil.which("brew")
+        if brew:
+            try:
+                subprocess.run([brew, "tap", "yakitrak/yakitrak"], capture_output=True, timeout=60)
+                result = subprocess.run([brew, "install", "obsidian-cli"], capture_output=True, timeout=120)
+                if result.returncode == 0:
+                    click.echo("  ✓ obsidian-cli installed")
+                    return
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        go = shutil.which("go")
+        if go:
+            try:
+                click.echo("  Trying: go install...")
+                result = subprocess.run(
+                    [go, "install", "github.com/Yakitrak/obsidian-cli@latest"],
+                    capture_output=True, timeout=120,
+                )
+                if result.returncode == 0:
+                    click.echo("  ✓ obsidian-cli installed via go")
+                    return
+            except (subprocess.TimeoutExpired, FileNotFoundError):
+                pass
+
+        click.echo("  ✗ Installation failed")
+        click.echo("  Manual: brew tap yakitrak/yakitrak && brew install obsidian-cli")
+        return
+
+    if action == "disable":
+        set_setting("obsidian_vault", "")
+        click.echo("  ✓ Obsidian integration disabled")
+        return
+
+    if action == "vault":
+        if len(args) < 2:
+            click.echo("  Usage: openlama config obsidian vault <name>")
+            click.echo("  Example: openlama config obsidian vault MyVault")
+            return
+        vault_name = args[1]
+        set_setting("obsidian_vault", vault_name)
+        cli_installed = shutil.which("obsidian-cli") is not None
+        click.echo(f"  ✓ Obsidian vault: {vault_name}")
+        if not cli_installed:
+            click.echo("  ⚠ obsidian-cli not installed. Run: openlama config obsidian install")
+        return
+
+    click.echo(f"  Unknown action: {action}. Use: status, install, vault <name>, disable")
+
+
+# ─── Tool command ─────────────────────────────
+
+@main.group()
+def tool():
+    """Manage tools (list registered tools)."""
+    pass
+
+
+@tool.command("list")
+def tool_list():
+    """List all registered tools."""
+    from openlama.database import init_db
+    from openlama.tools import init_tools, get_all_tools
+    init_db()
+    init_tools()
+
+    tools = get_all_tools()
+    if not tools:
+        click.echo("  No tools registered.")
+        return
+
+    click.echo(f"\n  Registered tools ({len(tools)}):\n")
+    click.echo(f"  {'Name':20s} {'Admin':6s} Description")
+    click.echo(f"  {'─' * 20} {'─' * 6} {'─' * 50}")
+    for t in sorted(tools, key=lambda x: x.name):
+        admin = "yes" if t.admin_only else ""
+        desc = (t.description or "")[:50]
+        click.echo(f"  {t.name:20s} {admin:6s} {desc}")
+    click.echo()
 
 
 # ─── Logs command ─────────────────────────────
