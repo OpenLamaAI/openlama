@@ -47,7 +47,7 @@ from openlama.database import (
     get_admin_password_hash,
     get_allowed_ids,
     get_model_settings,
-    save_model_settings,
+    set_model_setting,
     get_user,
     is_allowed,
     is_authed,
@@ -1312,7 +1312,7 @@ async def cron_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not jobs:
         await update.message.reply_text(
             "📅 <b>Scheduled Tasks</b>\n\nNo tasks registered.\n"
-            "Create via chat: <i>\"매일 9시에 뉴스 요약해줘\"</i>",
+            "Create via chat: <i>\"Summarize tech news every day at 9am\"</i>",
             parse_mode="HTML",
         )
         return
@@ -1330,9 +1330,9 @@ async def profile_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     uid = user.telegram_id
     update_user(uid, state="setup_lang")
     await update.message.reply_text(
-        "🌍 Select your language / 언어를 선택하세요:",
+        "🌍 Select your language:",
         reply_markup=InlineKeyboardMarkup([
-            [InlineKeyboardButton("🇰🇷 한국어", callback_data="lang:ko")],
+            [InlineKeyboardButton("🇰🇷 Korean", callback_data="lang:ko")],
             [InlineKeyboardButton("🇺🇸 English", callback_data="lang:en")],
             [InlineKeyboardButton("🇯🇵 日本語", callback_data="lang:ja")],
         ]),
@@ -1368,7 +1368,7 @@ async def set_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
             val = int(value)
         else:
             val = float(value)
-        save_model_settings(uid, model, **{param: val})
+        set_model_setting(uid, model, param, val)
         await update.message.reply_text(f"✓ {param} = {val} (model: {model})")
     except ValueError:
         await update.message.reply_text(f"Invalid value: {value}")

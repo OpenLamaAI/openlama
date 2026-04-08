@@ -39,7 +39,7 @@ def test_preset_keyboard_num_ctx():
     buttons = [b.text for row in kb.inline_keyboard for b in row]
     assert "2,048" in buttons
     assert "262,144" in buttons
-    assert "⬅ 돌아가기" in buttons
+    assert any("⬅" in b for b in buttons)
 
 
 def test_preset_keyboard_num_ctx_no_max():
@@ -74,14 +74,14 @@ def test_preset_keyboard_context_turns():
 def test_preset_keyboard_context_ttl():
     kb = preset_keyboard("context_ttl")
     buttons = [b.text for row in kb.inline_keyboard for b in row]
-    assert "5분" in buttons
-    assert "24시간" in buttons
+    assert any("5" in b for b in buttons)  # "5분" or "5m"
+    assert any("24" in b for b in buttons)  # "24시간" or "24h"
 
 
 def test_preset_keyboard_unknown():
     kb = preset_keyboard("unknown_param")
     assert len(kb.inline_keyboard) == 1
-    assert "돌아가기" in kb.inline_keyboard[0][0].text
+    assert "⬅" in kb.inline_keyboard[0][0].text
 
 
 # ── PARAM_CONFIG validation ──

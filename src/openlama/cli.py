@@ -267,7 +267,7 @@ def status():
     skills = list_skills()
     lines.append(f"  Skills:   {len(skills)} installed")
 
-    console.print(Panel("\n".join(lines), title="openlama Status", border_style="blue"))
+    console.print(Panel("\n".join(lines), title=f"openlama v{__version__}", border_style="blue"))
 
 
 # ─── Update command ─────────────────────────────

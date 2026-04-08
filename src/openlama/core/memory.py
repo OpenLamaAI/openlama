@@ -39,7 +39,7 @@ def save_memory_entry(content: str, category: str = "other") -> str:
     date = datetime.now().strftime("%Y-%m-%d")
     entry = f"- [{date}] {content}"
 
-    existing = p.read_text(encoding="utf-8") if p.exists() else "# 장기 메모리\n"
+    existing = p.read_text(encoding="utf-8") if p.exists() else "# Long-term Memory\n"
 
     section = f"## {category}"
     if section in existing:

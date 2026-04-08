@@ -6,7 +6,7 @@ from pathlib import Path
 # ── Platform detection ────────────────────────────────────
 TERMUX = os.environ.get("TERMUX_VERSION") is not None
 IS_ANDROID = sys.platform == "linux" and TERMUX
-IS_MOBILE = IS_ANDROID  # iOS: 추후 추가
+IS_MOBILE = IS_ANDROID  # iOS: future addition
 
 # Data directory (only hardcoded path)
 DATA_DIR = Path(os.environ.get("OPENLAMA_DATA_DIR", str(Path.home() / ".config" / "openlama")))

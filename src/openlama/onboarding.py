@@ -125,7 +125,7 @@ def _step_ollama():
     is_remote = not any(h in existing_base for h in ("127.0.0.1", "localhost", "0.0.0.0"))
 
     if TERMUX:
-        console.print("  [dim]모바일 환경 감지됨[/dim]\n")
+        console.print("  [dim]Mobile environment detected[/dim]\n")
 
     mode = questionary.select(
         "  Ollama server location:",
@@ -278,12 +278,12 @@ def _step_models():
     from openlama.config import is_ollama_remote
 
     if IS_ANDROID:
-        console.print("  [dim]모바일 환경 — 경량 모델을 권장합니다[/dim]\n")
+        console.print("  [dim]Mobile environment — lightweight models recommended[/dim]\n")
 
     if is_ollama_remote():
         # Remote server: just ask for model name, don't need lightweight
         import questionary
-        console.print("  [dim]원격 서버 사용 중 — 서버에 설치된 모델을 선택하세요[/dim]\n")
+        console.print("  [dim]Using remote server — select a model installed on the server[/dim]\n")
         installed = set()
         try:
             r = httpx.get(f"{_get_ollama_url()}/api/tags", timeout=5)
@@ -558,7 +558,7 @@ def _step_features():
     if IS_ANDROID:
         # Mobile: skip ComfyUI, check Termux:API
         _save("comfy_enabled", "false")
-        console.print("  [dim]ComfyUI: 모바일 환경에서 비활성화됨[/dim]")
+        console.print("  [dim]ComfyUI: disabled on mobile[/dim]")
         if shutil.which("termux-battery-status"):
             console.print("  ✓ Termux:API detected — device control tools enabled")
         else:
