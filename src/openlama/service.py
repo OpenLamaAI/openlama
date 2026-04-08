@@ -1,9 +1,9 @@
-"""OS service registration — launchd (macOS) / systemd (Linux)."""
+"""OS service registration — launchd (macOS) / systemd (Linux) / Termux:Boot (Android)."""
 import sys
 import shutil
 import subprocess
 from pathlib import Path
-from openlama.config import DATA_DIR
+from openlama.config import DATA_DIR, TERMUX
 
 def _find_openlama_bin() -> str:
     path = shutil.which("openlama")
@@ -13,6 +13,8 @@ def install():
     """Register as OS service."""
     if sys.platform == "darwin":
         _install_launchd()
+    elif TERMUX:
+        _install_termux()
     elif sys.platform == "linux":
         _install_systemd()
     elif sys.platform == "win32":
@@ -24,6 +26,8 @@ def uninstall():
     """Remove OS service."""
     if sys.platform == "darwin":
         _uninstall_launchd()
+    elif TERMUX:
+        _uninstall_termux()
     elif sys.platform == "linux":
         _uninstall_systemd()
     elif sys.platform == "win32":
@@ -124,3 +128,38 @@ def _uninstall_systemd():
         print("🗑 Service removed")
     else:
         print("No service found")
+
+def _install_termux():
+    """Create Termux:Boot auto-start script."""
+    boot_dir = Path.home() / ".termux" / "boot"
+    boot_dir.mkdir(parents=True, exist_ok=True)
+    bin_path = _find_openlama_bin()
+    log = str(DATA_DIR / "openlama.log")
+    from openlama.config import is_ollama_remote
+
+    script = boot_dir / "start-openlama.sh"
+    lines = [
+        "#!/data/data/com.termux/files/usr/bin/bash",
+        "# openlama auto-start script (Termux:Boot)",
+        "termux-wake-lock",
+    ]
+    if not is_ollama_remote():
+        lines += [
+            "ollama serve > /dev/null 2>&1 &",
+            "sleep 3",
+        ]
+    lines.append(f"{bin_path} start >> {log} 2>&1 &")
+
+    script.write_text("\n".join(lines) + "\n")
+    script.chmod(0o755)
+    print(f"✅ Termux:Boot script created: {script}")
+    print("   openlama will start on device boot")
+    print("   ⚠ Requires Termux:Boot app from F-Droid")
+
+def _uninstall_termux():
+    script = Path.home() / ".termux" / "boot" / "start-openlama.sh"
+    if script.exists():
+        script.unlink()
+        print("🗑 Termux:Boot script removed")
+    else:
+        print("No boot script found")

@@ -90,15 +90,17 @@ def _ollama_installed() -> bool:
 
 
 async def _show_status(update_or_query):
-    installed = _ollama_installed()
-    alive = await ollama_alive() if installed else False
+    from openlama.config import is_ollama_remote
+    remote = is_ollama_remote()
+    installed = remote or _ollama_installed()
+    alive = await ollama_alive()
 
     if not installed:
         status = "❌ Not Installed"
     elif alive:
-        status = "🟢 Online"
+        status = "🟢 Online" + (" (remote)" if remote else "")
     else:
-        status = "🔴 Offline"
+        status = "🔴 Offline" + (" (remote)" if remote else "")
 
     text = (
         f"🖥 <b>Ollama Server Status</b>\n\n"

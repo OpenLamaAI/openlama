@@ -1,16 +1,47 @@
 """Tool: obsidian – Obsidian vault management via obsidian-cli."""
 
 import asyncio
+import shutil
 
 from openlama.config import get_config_int
 from openlama.tools.registry import register_tool
+
+
+def _find_obsidian_cli() -> str | None:
+    """Find obsidian-cli binary, checking common paths if not in PATH."""
+    found = shutil.which("obsidian-cli")
+    if found:
+        return found
+    # Common install locations not always in daemon PATH
+    import sys
+    extra_paths = ["/opt/homebrew/bin/obsidian-cli", "/usr/local/bin/obsidian-cli"]
+    if sys.platform == "win32":
+        import os
+        gopath = os.environ.get("GOPATH", str(__import__("pathlib").Path.home() / "go"))
+        extra_paths.append(f"{gopath}\\bin\\obsidian-cli.exe")
+    else:
+        import os
+        gopath = os.environ.get("GOPATH", str(__import__("pathlib").Path.home() / "go"))
+        extra_paths.append(f"{gopath}/bin/obsidian-cli")
+    for p in extra_paths:
+        if __import__("os").path.isfile(p):
+            return p
+    return None
 
 
 async def _run_obsidian(args: list[str], timeout: int = None) -> str:
     """Run an obsidian-cli command and return output."""
     if timeout is None:
         timeout = get_config_int("code_execution_timeout", 30)
-    cmd = ["obsidian-cli"] + args
+    cli_bin = _find_obsidian_cli()
+    if not cli_bin:
+        return (
+            "obsidian-cli is not installed. Install with:\n"
+            "  macOS/Linux: brew tap yakitrak/yakitrak && brew install obsidian-cli\n"
+            "  Go:          go install github.com/Yakitrak/obsidian-cli@latest\n"
+            "  Or run:      openlama config obsidian install"
+        )
+    cmd = [cli_bin] + args
     try:
         proc = await asyncio.create_subprocess_exec(
             *cmd,

@@ -94,6 +94,19 @@ def _restart_daemon_if_running():
         console.print("  [dim]Run manually: openlama restart[/dim]")
 
 
+def _get_ollama_url() -> str:
+    """Get the current ollama_base URL (DB → env → default)."""
+    try:
+        from openlama.database import get_setting
+        val = get_setting("ollama_base")
+        if val:
+            return val.rstrip("/")
+    except Exception:
+        pass
+    import os as _os
+    return _os.environ.get("OLLAMA_BASE", "http://127.0.0.1:11434").rstrip("/")
+
+
 def _save(key: str, value: str):
     from openlama.database import init_db, set_setting
     DATA_DIR.mkdir(parents=True, exist_ok=True)
@@ -102,12 +115,53 @@ def _save(key: str, value: str):
 
 
 def _step_ollama():
-    """Step 1: Check/install Ollama."""
+    """Step 1: Check/install Ollama or connect to remote server."""
     console.print("\n  [bold]● Step 1/7 — Ollama[/bold]\n")
+
+    import questionary
+
+    # Ask: local or remote?
+    existing_base = _get_existing("ollama_base") or _get_ollama_url()
+    is_remote = not any(h in existing_base for h in ("127.0.0.1", "localhost", "0.0.0.0"))
+
+    if TERMUX:
+        console.print("  [dim]모바일 환경 감지됨[/dim]\n")
+
+    mode = questionary.select(
+        "  Ollama server location:",
+        choices=[
+            questionary.Choice("Local (this machine)", value="local"),
+            questionary.Choice("Remote server (recommended for mobile)", value="remote"),
+        ],
+        default="remote" if (TERMUX or is_remote) else "local",
+    ).ask()
+
+    if mode == "remote":
+        url = questionary.text(
+            "  Remote Ollama URL:",
+            default=existing_base if is_remote else "http://192.168.1.100:11434",
+        ).ask()
+        if url:
+            url = url.rstrip("/")
+            _save("ollama_base", url)
+            console.print(f"  Checking connection to {url}...")
+            try:
+                r = httpx.get(f"{url}/api/version", timeout=5)
+                if r.status_code == 200:
+                    ver = r.json().get("version", "?")
+                    console.print(f"  ✓ Remote Ollama connected (v{ver})")
+                    return
+            except Exception:
+                pass
+            console.print("  [yellow]⚠ Cannot connect now. Make sure the server is running.[/yellow]")
+            console.print(f"  [dim]Saved URL: {url} — you can change later with 'openlama config set ollama_base <url>'[/dim]")
+        return
+
+    # Local mode
+    _save("ollama_base", "http://127.0.0.1:11434")
 
     if shutil.which("ollama"):
         console.print("  ✓ Ollama is installed")
-        # Check if server is running
         try:
             r = httpx.get(f"{_get_ollama_url()}/api/version", timeout=3)
             if r.status_code == 200:
@@ -132,16 +186,23 @@ def _step_ollama():
         console.print("  [red]✗ Could not start Ollama server[/red]")
         return
 
-    # Not installed
+    # Not installed — install
     console.print("  ✗ Ollama is not installed")
-    import questionary
     install = questionary.confirm("  Install Ollama now?", default=True).ask()
     if not install:
         console.print("  [yellow]Skipped. Install Ollama manually: https://ollama.com[/yellow]")
         return
 
     console.print("  Installing Ollama...")
-    if sys.platform == "win32":
+    if TERMUX:
+        subprocess.run(["pkg", "install", "-y", "tur-repo"], capture_output=True)
+        result = subprocess.run(["pkg", "install", "-y", "ollama"], capture_output=True, text=True)
+        if result.returncode == 0:
+            console.print("  ✓ Ollama installed via Termux")
+        else:
+            console.print("  [red]✗ Failed. Try manually: pkg install tur-repo && pkg install ollama[/red]")
+            return
+    elif sys.platform == "win32":
         console.print("  Ollama must be installed manually on Windows.")
         console.print("  Download: https://ollama.com/download/windows")
         return
@@ -183,7 +244,7 @@ def _pull_model_with_progress(model: str):
 
             with httpx.stream(
                 "POST",
-                "http://127.0.0.1:11434/api/pull",
+                f"{_get_ollama_url()}/api/pull",
                 json={"name": model, "stream": True},
                 timeout=None,
             ) as response:
@@ -214,6 +275,41 @@ def _step_models():
     """Step 2: Select and download models."""
     console.print("\n  [bold]● Step 2/7 — Models[/bold]\n")
 
+    from openlama.config import is_ollama_remote
+
+    if IS_ANDROID:
+        console.print("  [dim]모바일 환경 — 경량 모델을 권장합니다[/dim]\n")
+
+    if is_ollama_remote():
+        # Remote server: just ask for model name, don't need lightweight
+        import questionary
+        console.print("  [dim]원격 서버 사용 중 — 서버에 설치된 모델을 선택하세요[/dim]\n")
+        installed = set()
+        try:
+            r = httpx.get(f"{_get_ollama_url()}/api/tags", timeout=5)
+            if r.status_code == 200:
+                for m in r.json().get("models", []):
+                    installed.add(m.get("name", ""))
+        except Exception:
+            pass
+
+        if installed:
+            default = questionary.select("  Select default model:", choices=sorted(installed)).ask()
+            if default:
+                _save("default_model", default)
+                console.print(f"  ✓ Default model: {default}")
+        else:
+            console.print("  [yellow]Cannot reach remote server. Set model later with 'openlama config set default_model <model>'[/yellow]")
+        return
+
+    MOBILE_RECOMMENDED = [
+        ("gemma4:e2b",       "7.2 GB", "recommended — mobile optimized"),
+        ("gemma3:4b",        "3.3 GB", "recommended"),
+        ("phi4-mini",        "2.5 GB", "light"),
+        ("gemma3:1b",        "0.8 GB", "ultralight"),
+        ("llama3.2:1b",      "1.3 GB", "ultralight"),
+    ]
+
     RECOMMENDED = [
         ("gemma3:4b",        "3.3 GB", "recommended"),
         ("gemma4:e4b",       "9.6 GB", "recommended"),
@@ -227,10 +323,12 @@ def _step_models():
         ("llama3.2:1b",      "1.3 GB", "ultralight"),
     ]
 
+    model_list = MOBILE_RECOMMENDED if IS_ANDROID else RECOMMENDED
+
     # Check already installed
     installed = set()
     try:
-        r = httpx.get("http://127.0.0.1:11434/api/tags", timeout=5)
+        r = httpx.get(f"{_get_ollama_url()}/api/tags", timeout=5)
         if r.status_code == 200:
             for m in r.json().get("models", []):
                 installed.add(m.get("name", ""))
@@ -239,7 +337,7 @@ def _step_models():
 
     import questionary
     choices = []
-    for tag, size, cat in RECOMMENDED:
+    for tag, size, cat in model_list:
         prefix = "✓ " if tag in installed else "  "
         choices.append(questionary.Choice(f"{prefix}{tag:20s} {size:>8s}  [{cat}]", value=tag, checked=tag in installed))
     choices.append(questionary.Choice("  [Custom input]", value="_custom"))
@@ -453,6 +551,19 @@ def _step_features():
 
     import questionary
 
+    if IS_ANDROID:
+        # Mobile: skip ComfyUI, check Termux:API
+        _save("comfy_enabled", "false")
+        console.print("  [dim]ComfyUI: 모바일 환경에서 비활성화됨[/dim]")
+        if shutil.which("termux-battery-status"):
+            console.print("  ✓ Termux:API detected — device control tools enabled")
+        else:
+            console.print("  ⚠ Termux:API not installed")
+            console.print("    Install: F-Droid > Termux:API app, then 'pkg install termux-api'")
+        sandbox = str(_DEFAULTS["tool_sandbox_path"])
+        _save("tool_sandbox_path", sandbox)
+        return
+
     # Auto-detect ComfyUI
     detected = _detect_comfyui()
     if detected:
@@ -527,24 +638,39 @@ def _step_stt():
         console.print("  [dim]You can install manually: pip install faster-whisper[/dim]")
 
 
+def _find_obsidian_cli() -> str | None:
+    """Find obsidian-cli, checking common paths beyond PATH."""
+    found = shutil.which("obsidian-cli")
+    if found:
+        return found
+    import os
+    extra = ["/opt/homebrew/bin/obsidian-cli", "/usr/local/bin/obsidian-cli"]
+    gopath = os.environ.get("GOPATH", str(Path.home() / "go"))
+    extra.append(os.path.join(gopath, "bin", "obsidian-cli"))
+    for p in extra:
+        if os.path.isfile(p):
+            return p
+    return None
+
+
 def _step_obsidian():
     """Step 7: Obsidian vault integration."""
     console.print("\n  [bold]● Step 7/7 — Obsidian Notes[/bold]\n")
 
     import questionary
 
-    cli_installed = shutil.which("obsidian-cli") is not None
+    cli_path = _find_obsidian_cli()
     existing_vault = _get_existing("obsidian_vault")
 
-    if cli_installed:
-        console.print("  ✓ obsidian-cli is installed")
+    if cli_path:
+        console.print(f"  ✓ obsidian-cli is installed ({cli_path})")
     else:
         console.print("  Obsidian integration lets the AI read/create/search your notes.")
         console.print("  [dim]Requires: obsidian-cli (brew install)[/dim]")
 
     enable = questionary.confirm(
         "  Enable Obsidian integration?",
-        default=bool(existing_vault or cli_installed),
+        default=bool(existing_vault or cli_path),
     ).ask()
 
     if not enable:
@@ -553,10 +679,11 @@ def _step_obsidian():
         return
 
     # Install obsidian-cli if needed
-    if not cli_installed:
+    if not cli_path:
         console.print("\n  Installing obsidian-cli...")
         if _install_obsidian_cli():
-            console.print("  [green]✓ obsidian-cli installed[/green]")
+            cli_path = _find_obsidian_cli()
+            console.print(f"  [green]✓ obsidian-cli installed[/green]")
         else:
             console.print("  [red]✗ Installation failed[/red]")
             console.print("  [dim]Install manually: brew tap yakitrak/yakitrak && brew install obsidian-cli[/dim]")
@@ -595,10 +722,37 @@ def _step_obsidian():
     if vault:
         _save("obsidian_vault", vault)
         console.print(f"  ✓ Obsidian vault: {vault}")
+        # Verify connection
+        if cli_path:
+            _verify_obsidian_vault(cli_path, vault)
     else:
         _save("obsidian_vault", "")
         console.print("  [yellow]⚠ No vault configured. Obsidian tool will be active but may return errors.[/yellow]")
         console.print("  [dim]Set later: openlama config obsidian[/dim]")
+
+
+def _verify_obsidian_vault(cli_path: str, vault: str):
+    """Verify obsidian-cli can access the configured vault."""
+    try:
+        # Set default vault
+        result = subprocess.run(
+            [cli_path, "set-default", vault],
+            capture_output=True, text=True, timeout=10,
+        )
+        # Try listing vault contents
+        result = subprocess.run(
+            [cli_path, "list", "-v", vault],
+            capture_output=True, text=True, timeout=10,
+        )
+        if result.returncode == 0:
+            lines = [l for l in result.stdout.strip().split("\n") if l.strip()]
+            console.print(f"  [green]✓ Vault connected: {len(lines)} items found[/green]")
+        else:
+            err = result.stderr.strip()
+            console.print(f"  [yellow]⚠ Vault access issue: {err[:100]}[/yellow]")
+            console.print("  [dim]Check vault name matches exactly (case-sensitive)[/dim]")
+    except Exception as e:
+        console.print(f"  [yellow]⚠ Could not verify vault: {e}[/yellow]")
 
 
 def _install_obsidian_cli() -> bool:

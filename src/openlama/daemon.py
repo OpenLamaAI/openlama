@@ -1,10 +1,11 @@
 """Daemon management — PID file based."""
 import os
+import subprocess
 import sys
 import signal
 import time
 from pathlib import Path
-from openlama.config import DATA_DIR
+from openlama.config import DATA_DIR, TERMUX
 
 PID_FILE = DATA_DIR / "openlama.pid"
 LOG_FILE = DATA_DIR / "openlama.log"
@@ -38,26 +39,34 @@ def start_daemon():
 
     DATA_DIR.mkdir(parents=True, exist_ok=True)
 
-    if sys.platform == "win32":
-        # Windows: use subprocess with CREATE_NO_WINDOW
-        import subprocess
+    if sys.platform == "win32" or TERMUX:
+        # Windows / Termux: use subprocess (fork is unreliable on Android)
         log_fd = open(LOG_FILE, "a", encoding="utf-8")
-        CREATE_NO_WINDOW = 0x08000000
+        popen_kw: dict = {"start_new_session": True}
+        if sys.platform == "win32":
+            popen_kw = {"creationflags": 0x08000000}  # CREATE_NO_WINDOW
         try:
             proc = subprocess.Popen(
                 [sys.executable, "-m", "openlama.cli", "start"],
                 stdout=log_fd,
                 stderr=log_fd,
-                creationflags=CREATE_NO_WINDOW,
+                **popen_kw,
             )
             PID_FILE.write_text(str(proc.pid))
             print(f"🟢 openlama daemon started (PID {proc.pid})")
             print(f"   Logs: {LOG_FILE}")
+            if TERMUX:
+                # Acquire wake-lock to prevent Android from killing the process
+                result = subprocess.run(
+                    ["termux-wake-lock"], capture_output=True, timeout=5,
+                )
+                if result.returncode == 0:
+                    print("   🔒 Wake lock acquired")
         finally:
             log_fd.close()
         return
 
-    # Unix: fork
+    # Unix (macOS/Linux desktop): fork
     pid = os.fork()
     if pid > 0:
         # Parent
@@ -96,8 +105,6 @@ def stop_daemon():
         return
 
     if sys.platform == "win32":
-        # Windows: use taskkill
-        import subprocess
         subprocess.run(["taskkill", "/PID", str(pid), "/F"], capture_output=True)
     else:
         os.kill(pid, signal.SIGTERM)
@@ -112,6 +119,9 @@ def stop_daemon():
 
     PID_FILE.unlink(missing_ok=True)
     print(f"🔴 openlama daemon stopped (was PID {pid})")
+
+    if TERMUX:
+        subprocess.run(["termux-wake-unlock"], capture_output=True, timeout=5)
 
 
 def restart_daemon():

@@ -1,6 +1,12 @@
 """Configuration — DB-first with environment variable fallback."""
 import os
+import sys
 from pathlib import Path
+
+# ── Platform detection ────────────────────────────────────
+TERMUX = os.environ.get("TERMUX_VERSION") is not None
+IS_ANDROID = sys.platform == "linux" and TERMUX
+IS_MOBILE = IS_ANDROID  # iOS: 추후 추가
 
 # Data directory (only hardcoded path)
 DATA_DIR = Path(os.environ.get("OPENLAMA_DATA_DIR", str(Path.home() / ".config" / "openlama")))
@@ -94,6 +100,13 @@ _DEFAULTS = {
     "comfy_workflow_img2img": "img2img_default",
 }
 
+# ── Mobile (Termux) defaults override ─────────────────────
+if TERMUX:
+    _DEFAULTS["tool_sandbox_path"] = str(DATA_DIR / "sandbox")
+    _DEFAULTS["comfy_output_dir"] = str(DATA_DIR / "output")
+    _DEFAULTS["comfy_enabled"] = "false"
+    _DEFAULTS["ollama_timeout_sec"] = "180"
+
 
 def get_config(key: str, default: str | None = None) -> str:
     """Get config value: DB first, then env var, then default."""
@@ -130,3 +143,9 @@ def get_config_float(key: str, default: float = 0.0) -> float:
 
 def get_config_bool(key: str, default: bool = False) -> bool:
     return get_config(key, str(default)).lower() in ("true", "1", "yes")
+
+
+def is_ollama_remote() -> bool:
+    """Check if ollama_base points to a non-localhost server."""
+    base = get_config("ollama_base")
+    return not any(h in base for h in ("127.0.0.1", "localhost", "0.0.0.0"))

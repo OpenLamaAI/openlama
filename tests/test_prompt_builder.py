@@ -32,7 +32,7 @@ def test_generate_system_prompt_returns_string(prompts_dir):
 
 def test_generate_system_prompt_has_tools_section(prompts_dir):
     result = generate_system_prompt()
-    assert "## Available Tools" in result
+    assert "## Tools" in result
 
 
 def test_generate_system_prompt_has_system_header(prompts_dir):
@@ -40,9 +40,9 @@ def test_generate_system_prompt_has_system_header(prompts_dir):
     assert "# System Prompt" in result
 
 
-def test_generate_system_prompt_has_operating_rules(prompts_dir):
+def test_generate_system_prompt_has_tool_triggers(prompts_dir):
     result = generate_system_prompt()
-    assert "## Operating Rules" in result
+    assert "## Tool Triggers" in result
 
 
 # ── build_full_system_prompt ──
@@ -71,8 +71,8 @@ def test_build_full_system_prompt_excludes_memory(prompts_dir):
     (prompts_dir / "MEMORY.md").write_text("# Memory\nUser likes coffee.", encoding="utf-8")
     result = build_full_system_prompt()
     assert "User likes coffee" not in result
-    # But the memory system description should be present
-    assert "Memory System" in result
+    # But the memory section should be present
+    assert "## Memory" in result
 
 
 def test_build_full_system_prompt_assembles_all_parts(prompts_dir):

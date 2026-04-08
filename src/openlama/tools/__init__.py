@@ -2,7 +2,7 @@
 import sys
 
 from openlama.tools.registry import get_all_tools, get_tool, execute_tool, format_tools_for_ollama
-from openlama.config import get_config
+from openlama.config import get_config, IS_ANDROID
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -39,3 +39,6 @@ def init_tools():
             pass
     if get_config("obsidian_vault"):
         import openlama.tools.obsidian_tool
+    # Android-only: Termux device control
+    if IS_ANDROID:
+        import openlama.tools.termux_tool

@@ -165,7 +165,14 @@ async def check_ollama() -> CheckResult:
 
 
 async def fix_ollama():
-    """Try to start Ollama."""
+    """Try to start Ollama (local only — remote servers cannot be started)."""
+    from openlama.config import is_ollama_remote
+    if is_ollama_remote():
+        url = get_config("ollama_base")
+        print(f"  Remote Ollama server at {url} is not reachable.")
+        print("  Check that the remote server is running and accessible.")
+        return False
+
     ollama_bin = shutil.which("ollama")
     if not ollama_bin:
         print("  Ollama binary not found. Install from https://ollama.com")
@@ -240,6 +247,7 @@ async def fix_ollama_version():
 
 def check_service_registered() -> CheckResult:
     """Check if openlama is registered as an OS service for auto-start on boot."""
+    from openlama.config import TERMUX
     if sys.platform == "darwin":
         plist = Path.home() / "Library" / "LaunchAgents" / "com.openlama.agent.plist"
         if plist.exists():
@@ -248,6 +256,15 @@ def check_service_registered() -> CheckResult:
             "Boot service", "warn",
             "Not registered. Run 'openlama start --install-service' to auto-start on boot.",
             fixable=True, fix_action="Register launchd service",
+        )
+    elif TERMUX:
+        script = Path.home() / ".termux" / "boot" / "start-openlama.sh"
+        if script.exists():
+            return CheckResult("Boot service", "ok", "Termux:Boot script registered")
+        return CheckResult(
+            "Boot service", "warn",
+            "Not registered. Run 'openlama start --install-service' for Termux:Boot auto-start.",
+            fixable=True, fix_action="Register Termux:Boot script",
         )
     elif sys.platform == "linux":
         unit = Path.home() / ".config" / "systemd" / "user" / "openlama.service"
