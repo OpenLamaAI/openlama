@@ -20,6 +20,15 @@ def init_tools():
     import openlama.tools.skill_creator
     import openlama.tools.mcp_manager
     import openlama.tools.cron_tool
-    # Conditional tools
+    import openlama.tools.tmux_tool
+    import openlama.tools.update_tool
+    # Conditional tools — whisper: auto-detect if faster-whisper is installed
+    stt_config = get_config("stt_enabled", "auto").lower()
+    if stt_config != "false":
+        try:
+            import faster_whisper  # noqa: F401
+            import openlama.tools.whisper_tool
+        except ImportError:
+            pass
     if get_config("obsidian_vault"):
         import openlama.tools.obsidian_tool
