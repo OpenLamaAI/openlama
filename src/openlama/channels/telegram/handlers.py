@@ -924,6 +924,14 @@ async def _do_chat_inner(
             total_req = prompt_tokens + completion_tokens
             if total_req > 0:
                 status_bar += f"\n💬 This request: {prompt_tokens:,} in + {completion_tokens:,} out = {total_req:,}"
+            # Line 3: model + bot info
+            status_bar += f"\n🤖 model: {model}"
+            try:
+                bot_info = context.bot
+                if bot_info and bot_info.username:
+                    status_bar += f"  |  telegram: @{bot_info.username}"
+            except Exception:
+                pass
             await update.message.reply_text(status_bar)
     except Exception:
         pass
