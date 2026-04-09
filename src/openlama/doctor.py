@@ -173,41 +173,22 @@ async def fix_ollama():
         print("  Check that the remote server is running and accessible.")
         return False
 
+    from openlama.ollama_client import start_ollama_service, ollama_alive
+
     ollama_bin = shutil.which("ollama")
     if not ollama_bin:
         print("  Ollama binary not found. Install from https://ollama.com")
         return False
 
     try:
-        import sys
-        import subprocess
-
-        started = False
-        # macOS: prefer brew services if installed via brew
-        if sys.platform == "darwin" and shutil.which("brew"):
-            result = subprocess.run(
-                ["brew", "list", "ollama"], capture_output=True, text=True, timeout=10,
-            )
-            if result.returncode == 0:
-                subprocess.run(["brew", "services", "start", "ollama"], capture_output=True, text=True, timeout=15)
-                started = True
-
-        # Linux: prefer systemctl
-        if not started and shutil.which("systemctl"):
-            subprocess.run(["systemctl", "start", "ollama"], capture_output=True, text=True, timeout=15)
-            started = True
-
-        # Fallback: direct ollama serve
+        started, method = start_ollama_service()
         if not started:
-            await asyncio.create_subprocess_exec(
-                ollama_bin, "serve",
-                stdout=asyncio.subprocess.DEVNULL,
-                stderr=asyncio.subprocess.DEVNULL,
-            )
+            print(f"  Could not start Ollama: {method}")
+            return False
 
-        for _ in range(10):
+        print(f"  Starting Ollama via {method}...")
+        for _ in range(15):
             await asyncio.sleep(1)
-            from openlama.ollama_client import ollama_alive
             if await ollama_alive():
                 return True
         return False

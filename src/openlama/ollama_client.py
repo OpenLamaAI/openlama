@@ -58,10 +58,83 @@ async def ollama_alive() -> bool:
         return False
 
 
+def start_ollama_service() -> tuple[bool, str]:
+    """Start Ollama via the correct service manager. Sync function.
+
+    Detection order:
+      1. macOS + brew installed via brew → brew services start
+      2. Linux + systemd → systemctl start
+      3. Fallback → ollama serve (direct, for Termux / manual installs)
+
+    Returns (started: bool, method: str).
+    """
+    import shutil
+    import subprocess
+    import sys
+
+    ollama_bin = shutil.which("ollama")
+    if not ollama_bin:
+        return False, "ollama not found"
+
+    # macOS: check if installed via brew
+    if sys.platform == "darwin" and shutil.which("brew"):
+        try:
+            result = subprocess.run(
+                ["brew", "list", "ollama"], capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                subprocess.run(
+                    ["brew", "services", "start", "ollama"],
+                    capture_output=True, text=True, timeout=15,
+                )
+                return True, "brew"
+        except Exception:
+            pass
+
+    # Linux: systemctl
+    if shutil.which("systemctl"):
+        try:
+            subprocess.run(
+                ["systemctl", "start", "ollama"],
+                capture_output=True, text=True, timeout=15,
+            )
+            return True, "systemctl"
+        except Exception:
+            pass
+
+    # Fallback: direct serve (Termux, manual install, etc.)
+    try:
+        popen_kw = {}
+        if sys.platform == "win32":
+            popen_kw["creationflags"] = subprocess.CREATE_NO_WINDOW
+        subprocess.Popen(
+            [ollama_bin, "serve"],
+            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+            **popen_kw,
+        )
+        return True, "direct"
+    except Exception as e:
+        return False, f"failed: {e}"
+
+
 async def ensure_ollama_running() -> tuple[bool, str]:
+    """Check if Ollama is alive. If not, attempt to start it."""
     if await ollama_alive():
         return True, "alive"
-    return False, "Ollama not reachable"
+
+    # Try to start
+    started, method = start_ollama_service()
+    if not started:
+        return False, f"Ollama not reachable and could not start ({method})"
+
+    # Wait for startup
+    for _ in range(15):
+        await asyncio.sleep(1)
+        if await ollama_alive():
+            logger.info("Ollama started via %s", method)
+            return True, f"started ({method})"
+
+    return False, f"Ollama started ({method}) but not responding"
 
 
 async def get_ollama_version() -> str | None:

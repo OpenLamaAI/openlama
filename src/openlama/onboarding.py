@@ -172,17 +172,18 @@ def _step_ollama():
             pass
         console.print("  ⚠ Ollama installed but server not running")
         console.print("  Starting Ollama server...")
-        popen_kw = {"creationflags": subprocess.CREATE_NO_WINDOW} if sys.platform == "win32" else {}
-        subprocess.Popen(["ollama", "serve"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL, **popen_kw)
-        for _ in range(15):
-            time.sleep(1)
-            try:
-                r = httpx.get(f"{_get_ollama_url()}/api/version", timeout=2)
-                if r.status_code == 200:
-                    console.print("  ✓ Ollama server started")
-                    return
-            except Exception:
-                continue
+        from openlama.ollama_client import start_ollama_service
+        started, method = start_ollama_service()
+        if started:
+            for _ in range(15):
+                time.sleep(1)
+                try:
+                    r = httpx.get(f"{_get_ollama_url()}/api/version", timeout=2)
+                    if r.status_code == 200:
+                        console.print(f"  ✓ Ollama server started ({method})")
+                        return
+                except Exception:
+                    continue
         console.print("  [red]✗ Could not start Ollama server[/red]")
         return
 
@@ -215,16 +216,13 @@ def _step_ollama():
         return
 
     console.print("  ✓ Ollama installed")
-    popen_kwargs = {}
-    if sys.platform == "win32":
-        popen_kwargs["creationflags"] = subprocess.CREATE_NO_WINDOW
-    subprocess.Popen(
-        ["ollama", "serve"],
-        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-        **popen_kwargs,
-    )
-    time.sleep(3)
-    console.print("  ✓ Ollama server started")
+    from openlama.ollama_client import start_ollama_service
+    started, method = start_ollama_service()
+    if started:
+        time.sleep(3)
+        console.print(f"  ✓ Ollama server started ({method})")
+    else:
+        console.print("  [yellow]⚠ Installed but could not auto-start. Run 'ollama serve' manually.[/yellow]")
 
 
 def _pull_model_with_progress(model: str):
