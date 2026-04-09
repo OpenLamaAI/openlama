@@ -525,8 +525,8 @@ def update(ollama_only, self_only):
                 console.print(f"  [red]Failed: {e}[/red]")
 
     # Restart daemon if running
-    from openlama.daemon import _read_pid
-    pid = _read_pid()
+    from openlama.daemon import _read_pid, _find_running_process
+    pid = _read_pid() or _find_running_process()
     if pid and not ollama_only:
         console.print("  [bold]Restarting daemon...[/bold]")
         from openlama.daemon import restart_daemon
