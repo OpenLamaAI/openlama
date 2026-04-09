@@ -1,11 +1,17 @@
-"""Multi-prompt assembly — SYSTEM + SOUL + USERS."""
+"""Multi-prompt assembly — SYSTEM + SOUL + USERS.
+
+Supports three prompt modes based on model context size:
+- full (num_ctx >= 32K): All sections, detailed documentation
+- compact (num_ctx >= 8K): Essential rules + execution bias, no tool list in prompt
+- minimal (num_ctx < 8K): Identity + core rules + execution bias only
+"""
 from __future__ import annotations
 
 from pathlib import Path
 
 from openlama.config import get_config, IS_ANDROID, DEFAULT_SYSTEM_PROMPT
 from openlama.tools.registry import get_all_tools
-from openlama.core.skills import build_skills_section
+from openlama.core.skills import discover_skills
 from openlama.logger import get_logger
 
 logger = get_logger("prompt")
@@ -47,6 +53,21 @@ def save_prompt_file(name: str, content: str):
     logger.info("saved prompt: %s (%d chars)", name, len(content))
 
 
+def get_prompt_mode(num_ctx: int) -> str:
+    """Determine prompt mode based on model context window size.
+
+    - full: num_ctx >= 32768 — all documentation sections
+    - compact: num_ctx >= 8192 — essential rules, no tool descriptions in prompt
+    - minimal: num_ctx < 8192 — bare minimum for tool usage
+    """
+    if num_ctx >= 32768:
+        return "full"
+    elif num_ctx >= 8192:
+        return "compact"
+    else:
+        return "minimal"
+
+
 def _build_tool_section() -> str:
     """Build the tools section with all registered tools + MCP tools."""
     tools = get_all_tools()
@@ -85,10 +106,40 @@ def _build_cron_section() -> str:
         return ""
 
 
-def generate_system_prompt() -> str:
-    """Build system prompt dynamically from current tools, skills, MCP, cron."""
+def _build_skills_section_lazy() -> str:
+    """Build skills section for lazy loading — lists skills with paths only."""
+    skills = discover_skills()
+    if not skills:
+        return ""
+
+    lines = ["## Available Skills"]
+    lines.append("If a skill matches the user's request, read its SKILL.md via file_read before acting.")
+    lines.append("Only read one skill. Do not read if none clearly apply.")
+    for s in skills:
+        desc = s.get("description", "")[:60]
+        path = s.get("path", "")
+        skill_md = f"{path}/SKILL.md" if path else ""
+        lines.append(f"- {s['name']}: {desc} (file: {skill_md})")
+    return "\n".join(lines)
+
+
+# ── Execution Bias (shared across all modes — CRITICAL for tool usage) ──
+
+_EXECUTION_BIAS = """## Execution Bias — ACT, do not just plan
+1. If the user asks you to do something and a tool can do it, CALL THE TOOL in the same turn. Do not just describe what you will do.
+2. WRONG: "검색해드릴게요" / "I'll search for you" → CORRECT: immediately call web_search.
+3. WRONG: "확인해보겠습니다" / "Let me check" → CORRECT: immediately call the relevant tool.
+4. A response that only describes a plan without calling any tool is INCOMPLETE. Always act first.
+5. If work needs multiple steps, call the first tool NOW, then continue with subsequent steps.
+6. Only explain your plan if the task is ambiguous and you need clarification. Otherwise, act immediately."""
+
+
+# ── Prompt generators per mode ──
+
+def _generate_full() -> str:
+    """Full system prompt — all sections. For models with >= 32K context."""
     tool_section = _build_tool_section()
-    skills_section = build_skills_section()
+    skills_section = _build_skills_section_lazy()
     cron_section = _build_cron_section()
 
     system = f"""# System Prompt
@@ -109,31 +160,10 @@ Understand any language; use tools directly without pre-checks.
 10. Respond based on FACTS only. If you don't know, say "I don't know." Do not guess, assume, or make up information.
 11. When the user criticizes you, verify the facts first before responding. Do not default to apologizing.
 
+{_EXECUTION_BIAS}
+
 ## Tools
 {tool_section}
-
-## Tool Triggers (any language → tool call)
-- "search X" / "X 검색해줘" → web_search
-- "what time" / "몇시야" → get_datetime
-- "calculate X" / "X 계산해줘" → calculator
-- "run code" / "코드 실행" → code_execute
-- "server status" / "서버 상태" → shell_command
-- "fetch URL" / "URL 내용" → url_fetch
-- "read file" / "파일 읽어" → file_read
-- "write file" / "파일 저장" → file_write
-- "remember this" / "기억해" → memory (save)
-- "yesterday's talk" / "어제 얘기" → memory (search_daily)
-- "create skill" / "스킬 만들어" → skill_creator
-- "schedule X daily" / "매일 X 등록" → cron_manager (convert to cron expr)
-- "generate image" / "그림 그려" → image_generate (translate prompt to English)
-- "edit image" / "이미지 수정" → image_edit
-- "tmux session" / "tmux 세션" → tmux
-- "update bot" / "업데이트" → self_update (check first, then update)
-- "transcribe audio" / "음성 변환" → whisper
-- "git status" / "깃 상태" → git
-- "check processes" / "프로세스 확인" → process_manager
-- "list notes" / "노트 목록" → obsidian
-- "install MCP" / "MCP 설치" → mcp_manager
 
 ## Memory (memory tool)
 Two-tier memory — use the memory tool to access both:
@@ -178,7 +208,74 @@ Call cron_manager with action "create", cron_expr, and task description.
         system += f"\n{cron_section}\n"
 
     if IS_ANDROID:
-        system += """
+        system += _ANDROID_SECTION
+
+    return system
+
+
+def _generate_compact() -> str:
+    """Compact system prompt — essential rules only. For 8K-32K context models.
+
+    Key design: tool descriptions are NOT included in prompt text.
+    The model receives full tool JSON Schemas via the Ollama tools parameter.
+    This saves ~400 tokens while preserving tool calling capability.
+    """
+    skills_section = _build_skills_section_lazy()
+    cron_section = _build_cron_section()
+
+    system = f"""# System Prompt
+
+You are a personal AI agent. Follow SOUL.md for identity, USERS.md for user context.
+Understand any language; use tools directly without pre-checks.
+
+## CRITICAL RULES
+1. All listed tools are fully authorized. NEVER refuse to use a tool. Just call it.
+2. NEVER fabricate tool results. Only report what the tool actually returned.
+3. If a tool result is empty or unclear, tell the user honestly rather than guessing.
+4. Use tools multiple times if needed to fulfill the user's request completely.
+5. Tool parameters are usually in English. Translate non-English references when needed.
+6. NEVER apologize for something you did correctly.
+7. Respond based on FACTS only. If you don't know, say "I don't know."
+
+{_EXECUTION_BIAS}
+
+## Memory (memory tool)
+Long-term: save/list/search/delete (MEMORY.md). Daily: list_dates/read_daily/search_daily (memories/YYYY-MM-DD.md).
+"""
+
+    if skills_section:
+        system += f"\n{skills_section}\n"
+
+    if cron_section:
+        system += f"\n{cron_section}\n"
+
+    if IS_ANDROID:
+        system += _ANDROID_SECTION_COMPACT
+
+    return system
+
+
+def _generate_minimal() -> str:
+    """Minimal system prompt — bare minimum. For models with < 8K context.
+
+    Focuses entirely on ensuring the model uses tools correctly.
+    """
+    return f"""# System Prompt
+
+You are a personal AI agent. Use tools to fulfill requests.
+
+## RULES
+1. All tools are authorized. Call them directly.
+2. NEVER fabricate results. Only report what tools return.
+3. If you don't know, say "I don't know."
+
+{_EXECUTION_BIAS}
+"""
+
+
+# ── Android sections ──
+
+_ANDROID_SECTION = """
 ## Mobile Device Context (Android / Termux)
 You have access to the `termux_device` tool to control this phone.
 
@@ -196,35 +293,51 @@ You have access to the `termux_device` tool to control this phone.
 - System: brightness, torch, clipboard_get/set, wallpaper, wifi_info/scan
 - Apps: app_launch (package name), app_list
 - Other: share, download, ir_transmit, fingerprint, dialog
-
-### Trigger Examples
-- "배터리 얼마야" / "check battery" → termux_device(action="battery")
-- "엄마한테 문자 보내" / "text mom" → confirm first, then termux_device(action="sms_send")
-- "사진 찍어" / "take a photo" → termux_device(action="camera_photo")
-- "지금 어디야" / "where am I" → termux_device(action="location")
-- "플래시 켜" / "turn on flashlight" → termux_device(action="torch", torch_enabled=true)
-- "볼륨 올려" / "volume up" → termux_device(action="volume_set")
 """
 
-    return system
+_ANDROID_SECTION_COMPACT = """
+## Mobile (Android/Termux)
+Use `termux_device` tool. NEVER call/SMS without user confirmation. Location is private.
+"""
 
 
-def build_full_system_prompt() -> str:
-    """Assemble all prompt files into one system prompt."""
+def generate_system_prompt(mode: str = "full") -> str:
+    """Build system prompt dynamically. Mode: 'full', 'compact', or 'minimal'."""
+    if mode == "minimal":
+        return _generate_minimal()
+    elif mode == "compact":
+        return _generate_compact()
+    else:
+        return _generate_full()
+
+
+def build_full_system_prompt(num_ctx: int = 8192) -> str:
+    """Assemble all prompt files into one system prompt.
+
+    Args:
+        num_ctx: Model context window size. Determines prompt mode:
+            >= 32K → full, >= 8K → compact, < 8K → minimal
+    """
+    mode = get_prompt_mode(num_ctx)
     parts = []
 
-    # Always regenerate system prompt to include latest tools and skills
-    system = generate_system_prompt()
+    # Generate system prompt based on mode
+    system = generate_system_prompt(mode)
     parts.append(system)
 
     # SOUL.md
     soul = _read_prompt("SOUL.md")
     if soul:
+        if mode == "minimal":
+            # Truncate for minimal mode
+            soul = soul[:200]
         parts.append(f"\n{soul}")
 
     # USERS.md
     users = _read_prompt("USERS.md")
     if users:
+        if mode == "minimal":
+            users = users[:200]
         parts.append(f"\n{users}")
 
     # MEMORY.md is NOT loaded into prompt — accessed via memory tool only.
@@ -232,4 +345,11 @@ def build_full_system_prompt() -> str:
     if not parts:
         return DEFAULT_SYSTEM_PROMPT
 
-    return "\n".join(parts)
+    # Inject current date/time once (uses system local timezone)
+    from datetime import datetime
+    now = datetime.now().strftime("%Y-%m-%d %H:%M %Z").strip()
+    parts.append(f"\nCurrent date/time: {now}")
+
+    prompt = "\n".join(parts)
+    logger.info("prompt mode=%s, num_ctx=%d, prompt_len=%d chars", mode, num_ctx, len(prompt))
+    return prompt

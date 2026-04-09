@@ -750,8 +750,8 @@ async def _do_chat_inner(
     else:
         full_text = user_text
 
-    system_prompt = build_full_system_prompt()
     settings = get_model_settings(uid, model)
+    system_prompt = build_full_system_prompt(num_ctx=settings.num_ctx)
     think = bool(user.think_mode) and await model_supports_thinking(model)
 
     # Context -- auto-compact based on num_ctx
@@ -793,12 +793,8 @@ async def _do_chat_inner(
     logger.info("model=%s, has_tools=%s, tools_count=%d, think=%s",
                 model, has_tools, len(tools) if tools else 0, think)
 
-    # Augment system prompt with current date/time
+    # Date/time is already included in system_prompt by build_full_system_prompt()
     final_system = system_prompt
-    from datetime import datetime, timezone, timedelta
-    kst = timezone(timedelta(hours=9))
-    today = datetime.now(kst).strftime("%Y-%m-%d %H:%M KST")
-    final_system += f"\n\nCurrent date/time: {today}"
 
     messages = _build_messages(final_system, ctx_items, full_text, summary)
 

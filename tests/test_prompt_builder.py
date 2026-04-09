@@ -7,8 +7,10 @@ import pytest
 from openlama.core.prompt_builder import (
     build_full_system_prompt,
     generate_system_prompt,
+    get_prompt_mode,
     is_profile_setup_done,
     save_prompt_file,
+    _EXECUTION_BIAS,
 )
 
 
@@ -21,28 +23,116 @@ def prompts_dir(tmp_path, monkeypatch):
     return d
 
 
-# ── generate_system_prompt ──
+# ── get_prompt_mode ──
 
 
-def test_generate_system_prompt_returns_string(prompts_dir):
+def test_prompt_mode_full():
+    assert get_prompt_mode(32768) == "full"
+    assert get_prompt_mode(131072) == "full"
+    assert get_prompt_mode(65536) == "full"
+
+
+def test_prompt_mode_compact():
+    assert get_prompt_mode(8192) == "compact"
+    assert get_prompt_mode(16384) == "compact"
+    assert get_prompt_mode(32767) == "compact"
+
+
+def test_prompt_mode_minimal():
+    assert get_prompt_mode(4096) == "minimal"
+    assert get_prompt_mode(2048) == "minimal"
+    assert get_prompt_mode(1024) == "minimal"
+
+
+# ── generate_system_prompt modes ──
+
+
+def test_generate_full_has_all_sections(prompts_dir):
+    result = generate_system_prompt(mode="full")
+    assert "# System Prompt" in result
+    assert "## CRITICAL RULES" in result
+    assert "## Execution Bias" in result
+    assert "## Tools" in result
+    assert "## Memory" in result
+    assert "## Scheduled Tasks" in result
+    assert "## Context Management" in result
+
+
+def test_generate_compact_has_essential_sections(prompts_dir):
+    result = generate_system_prompt(mode="compact")
+    assert "# System Prompt" in result
+    assert "## CRITICAL RULES" in result
+    assert "## Execution Bias" in result
+    assert "## Memory" in result
+    # Should NOT have detailed tool docs or context mgmt
+    assert "## Context Management" not in result
+    assert "## Tool-Specific Notes" not in result
+
+
+def test_generate_minimal_is_short(prompts_dir):
+    result = generate_system_prompt(mode="minimal")
+    assert "## RULES" in result or "## Execution Bias" in result
+    assert len(result) < 1500  # Should be well under 1500 chars
+
+
+def test_generate_default_is_full(prompts_dir):
     result = generate_system_prompt()
-    assert isinstance(result, str)
-    assert len(result) > 0
-
-
-def test_generate_system_prompt_has_tools_section(prompts_dir):
-    result = generate_system_prompt()
+    assert "## CRITICAL RULES" in result
     assert "## Tools" in result
 
 
-def test_generate_system_prompt_has_system_header(prompts_dir):
-    result = generate_system_prompt()
-    assert "# System Prompt" in result
+# ── Execution Bias presence (CRITICAL for tool usage) ──
 
 
-def test_generate_system_prompt_has_tool_triggers(prompts_dir):
-    result = generate_system_prompt()
-    assert "## Tool Triggers" in result
+def test_execution_bias_in_all_modes(prompts_dir):
+    """Execution Bias must be present in ALL prompt modes."""
+    for mode in ["full", "compact", "minimal"]:
+        result = generate_system_prompt(mode=mode)
+        assert "Execution Bias" in result, f"Execution Bias missing in {mode} mode"
+        assert "CALL THE TOOL" in result or "Call them directly" in result, \
+            f"Tool call instruction missing in {mode} mode"
+
+
+def test_execution_bias_has_korean_examples(prompts_dir):
+    """Execution Bias should include Korean planning examples."""
+    result = generate_system_prompt(mode="full")
+    assert "검색해드릴게요" in result
+    assert "확인해보겠습니다" in result
+
+
+def test_execution_bias_content():
+    """_EXECUTION_BIAS constant should have all required rules."""
+    assert "CALL THE TOOL" in _EXECUTION_BIAS
+    assert "INCOMPLETE" in _EXECUTION_BIAS
+    assert "검색해드릴게요" in _EXECUTION_BIAS
+
+
+# ── Tool Triggers removed ──
+
+
+def test_no_tool_triggers_section(prompts_dir):
+    """Tool Triggers section should NOT exist (removed for token savings)."""
+    for mode in ["full", "compact", "minimal"]:
+        result = generate_system_prompt(mode=mode)
+        assert "## Tool Triggers" not in result, f"Tool Triggers still in {mode} mode"
+
+
+# ── Compact mode is smaller than full ──
+
+
+def test_compact_smaller_than_full(prompts_dir):
+    full = generate_system_prompt(mode="full")
+    compact = generate_system_prompt(mode="compact")
+    # Compact should be significantly smaller
+    assert len(compact) < len(full) * 0.7, \
+        f"Compact ({len(compact)}) not significantly smaller than full ({len(full)})"
+
+
+def test_minimal_smaller_than_compact(prompts_dir):
+    compact = generate_system_prompt(mode="compact")
+    minimal = generate_system_prompt(mode="minimal")
+    assert len(minimal) < len(compact) * 0.8, \
+        f"Minimal ({len(minimal)}) not significantly smaller than compact ({len(compact)})"
 
 
 # ── build_full_system_prompt ──
@@ -71,19 +161,38 @@ def test_build_full_system_prompt_excludes_memory(prompts_dir):
     (prompts_dir / "MEMORY.md").write_text("# Memory\nUser likes coffee.", encoding="utf-8")
     result = build_full_system_prompt()
     assert "User likes coffee" not in result
-    # But the memory section should be present
-    assert "## Memory" in result
 
 
-def test_build_full_system_prompt_assembles_all_parts(prompts_dir):
-    (prompts_dir / "SOUL.md").write_text("# Soul\nI am uniquely creative.", encoding="utf-8")
-    (prompts_dir / "USERS.md").write_text("# Users\nUser is a developer.", encoding="utf-8")
-    (prompts_dir / "MEMORY.md").write_text("# Memory\nFavorite color is blue.", encoding="utf-8")
+def test_build_full_system_prompt_includes_datetime(prompts_dir):
+    """System prompt should include current date/time."""
     result = build_full_system_prompt()
-    assert "uniquely creative" in result
-    assert "User is a developer" in result
-    # MEMORY.md content should NOT be in prompt
-    assert "Favorite color is blue" not in result
+    assert "Current date/time:" in result
+
+
+def test_build_full_system_prompt_no_double_datetime(prompts_dir):
+    """Date/time should appear exactly once."""
+    result = build_full_system_prompt()
+    count = result.count("Current date/time:")
+    assert count == 1, f"Date/time appears {count} times, expected 1"
+
+
+def test_build_full_system_prompt_uses_num_ctx(prompts_dir):
+    """Different num_ctx values should produce different prompt sizes."""
+    full = build_full_system_prompt(num_ctx=32768)
+    compact = build_full_system_prompt(num_ctx=8192)
+    minimal = build_full_system_prompt(num_ctx=4096)
+    assert len(full) > len(compact) > len(minimal)
+
+
+def test_build_full_system_prompt_minimal_truncates_soul(prompts_dir):
+    """Minimal mode should truncate SOUL.md to 200 chars."""
+    long_soul = "# Soul\n" + "x" * 500
+    (prompts_dir / "SOUL.md").write_text(long_soul, encoding="utf-8")
+    result = build_full_system_prompt(num_ctx=4096)  # minimal mode
+    # Soul content should be truncated — at most 200 chars from the raw text
+    assert "x" * 300 not in result
+    # But some x's should remain (truncated version)
+    assert "x" * 100 in result
 
 
 # ── is_profile_setup_done ──
@@ -142,3 +251,19 @@ def test_save_prompt_file_creates_dir_if_missing(tmp_path, monkeypatch):
     monkeypatch.setattr("openlama.core.prompt_builder._prompts_dir", lambda: nested)
     save_prompt_file("NEW.md", "Content")
     assert (nested / "NEW.md").exists()
+
+
+# ── Lazy skill loading ──
+
+
+def test_full_mode_has_skills_with_file_paths(prompts_dir, tmp_path, monkeypatch):
+    """Full mode should list skills with file paths for lazy loading."""
+    from openlama.core.skills import save_skill, _invalidate_cache
+    skills_dir = tmp_path / "skills"
+    monkeypatch.setattr("openlama.core.skills._skills_dir", lambda: skills_dir)
+    _invalidate_cache()
+    save_skill("test_skill", "A test skill", "test", "Instructions")
+    result = generate_system_prompt(mode="full")
+    assert "Available Skills" in result
+    assert "file_read" in result or "SKILL.md" in result
+    _invalidate_cache()

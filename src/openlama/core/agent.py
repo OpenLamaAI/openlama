@@ -8,7 +8,6 @@ import re
 from openlama.core.types import ChatRequest, ChatResponse, TokenUsage
 from openlama.core.context import maybe_compress, _estimate_messages_tokens, build_context_bar
 from openlama.core.prompt_builder import build_full_system_prompt, is_profile_setup_done
-from openlama.core.skills import match_skill, get_skill_prompt
 from openlama.database import (
     get_user, get_model_settings, load_context, save_context,
 )
@@ -48,17 +47,21 @@ async def handle_tool_calls(
     tools: list[dict] | None = None,
     on_progress=None,
 ) -> tuple[str, list[str], TokenUsage]:
-    """Multi-turn tool loop. Returns (answer, image_paths, usage)."""
+    """Multi-turn tool loop with loop detection. Returns (answer, image_paths, usage)."""
+    from openlama.core.tool_loop import LoopDetector
+
     max_iter = get_config_int("tool_max_iterations", 20)
     total_usage = TokenUsage()
     image_paths: list[str] = []
     pending = tool_calls
+    detector = LoopDetector()
 
     for iteration in range(max_iter):
         if not pending:
             break
 
         round_tool_names = []
+        loop_critical = False
         for tc in pending:
             fn = tc.get("function", {})
             name = fn.get("name", "unknown")
@@ -75,6 +78,13 @@ async def handle_tool_calls(
 
             result = await execute_tool(name, args, uid)
 
+            # Check for tool loop
+            loop_warning = detector.record(name, args, result)
+            if loop_warning:
+                messages.append({"role": "system", "content": loop_warning})
+                if "CRITICAL" in loop_warning:
+                    loop_critical = True
+
             # Extract image paths
             for m in re.finditer(r"\[IMAGE:(.*?)]", result):
                 image_paths.append(m.group(1))
@@ -82,6 +92,18 @@ async def handle_tool_calls(
 
             messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
             messages.append({"role": "tool", "content": result})
+
+        if loop_critical:
+            logger.warning("tool loop CRITICAL — forcing synthesis")
+            messages.append({
+                "role": "system",
+                "content": "A tool calling loop was detected. Synthesize the results you have and respond to the user."
+            })
+            resp = await chat_with_ollama_full(model, messages, settings=settings, tools=None, think=think)
+            total_usage.prompt_tokens += resp.get("prompt_tokens", 0)
+            total_usage.completion_tokens += resp.get("completion_tokens", 0)
+            content = resp.get("content", "")
+            return content or "Tool loop detected — stopped.", image_paths, total_usage
 
         logger.info("round %d: tools=%s", iteration + 1, round_tool_names)
 
@@ -118,12 +140,15 @@ async def _call_with_auto_trim(
 ) -> dict:
     """Call Ollama with automatic context trimming on overflow.
 
-    If the request exceeds num_ctx (400 error), progressively removes
-    the oldest context messages and retries. If still failing after
-    trimming, compresses remaining context and retries once more.
+    Progressive recovery strategy:
+    1. First retry: try without tools (tools can cause 400 on some models)
+    2. Second retry: reduce system prompt to compact mode
+    3. Third+ retry: trim oldest context messages by half
+    4. Last resort: clear all context
     """
     last_error = None
-    for attempt in range(4):
+    prompt_reduced = False
+    for attempt in range(5):
         try:
             return await chat_with_ollama_full(
                 model, messages, settings=settings, tools=tools, think=think,
@@ -158,6 +183,17 @@ async def _call_with_auto_trim(
                 attempt + 1, len(context_msgs),
             )
 
+            # First context-error: reduce system prompt to minimal mode
+            if not prompt_reduced:
+                prompt_reduced = True
+                from openlama.core.prompt_builder import build_full_system_prompt
+                compact_prompt = build_full_system_prompt(num_ctx=4096)  # forces minimal
+                logger.info("Reducing system prompt: %d → %d chars",
+                            len(system_msg["content"]), len(compact_prompt))
+                system_msg = {"role": "system", "content": compact_prompt}
+                messages = [system_msg] + context_msgs + [user_msg]
+                continue
+
             if len(context_msgs) <= 2:
                 messages = [system_msg, user_msg]
                 save_context(uid, [])
@@ -190,11 +226,8 @@ async def chat(request: ChatRequest) -> ChatResponse:
     settings = get_model_settings(uid, model)
     think = bool(user.think_mode) and await model_supports_thinking(model)
 
-    # Build system prompt with current date
-    system_prompt = build_full_system_prompt()
-    from datetime import datetime, timezone, timedelta
-    utc_now = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M UTC")
-    system_prompt += f"\n\nCurrent date/time: {utc_now}"
+    # Build system prompt (includes date/time automatically, mode based on num_ctx)
+    system_prompt = build_full_system_prompt(num_ctx=settings.num_ctx)
 
     # Load context
     ctx_items = load_context(uid)
@@ -205,19 +238,13 @@ async def chat(request: ChatRequest) -> ChatResponse:
         user_text=request.text,
     )
 
-    # Match skill and inject into system prompt
-    matched = match_skill(request.text)
-    if matched:
-        skill_body = get_skill_prompt(matched["name"])
-        if skill_body:
-            system_prompt += f"\n\n[Skill activated: {matched['name']}]\n{skill_body}"
-            logger.info("skill matched: %s", matched["name"])
+    # Skills are now lazy-loaded: listed in system prompt with paths,
+    # model reads SKILL.md via file_read tool when needed.
 
     # Build messages
     messages: list[dict] = [{"role": "system", "content": system_prompt}]
     if summary:
-        messages.append({"role": "user", "content": "[Context summary]"})
-        messages.append({"role": "assistant", "content": summary})
+        messages.append({"role": "system", "content": f"Previous conversation summary:\n{summary}"})
     for item in ctx_items:
         messages.append({"role": "user", "content": item.get("u", "")})
         messages.append({"role": "assistant", "content": item.get("a", "")})
@@ -240,6 +267,33 @@ async def chat(request: ChatRequest) -> ChatResponse:
     content = resp.get("content", "")
     tool_calls = resp.get("tool_calls", [])
     image_paths: list[str] = []
+
+    # Incomplete turn / fabrication detection: ensure model actually uses tools
+    if not tool_calls and tools:
+        from openlama.core.incomplete_turn import (
+            is_incomplete_turn, is_fabricated_result,
+            RETRY_INSTRUCTION, FABRICATION_INSTRUCTION, MAX_RETRIES,
+        )
+        for _retry in range(MAX_RETRIES):
+            # Check fabrication first (model claims results without tool call)
+            if is_fabricated_result(content, bool(tool_calls)):
+                logger.warning("fabricated result detected (retry %d)", _retry + 1)
+                instruction = FABRICATION_INSTRUCTION
+            elif is_incomplete_turn(content, bool(tool_calls)):
+                logger.info("incomplete turn detected (retry %d)", _retry + 1)
+                instruction = RETRY_INSTRUCTION
+            else:
+                break
+
+            messages.append({"role": "assistant", "content": content})
+            messages.append({"role": "system", "content": instruction})
+            resp = await _call_with_auto_trim(model, messages, settings, tools, think, uid, ctx_items)
+            usage.prompt_tokens += resp.get("prompt_tokens", 0)
+            usage.completion_tokens += resp.get("completion_tokens", 0)
+            content = resp.get("content", "")
+            tool_calls = resp.get("tool_calls", [])
+            if tool_calls:
+                break
 
     if tool_calls:
         content, image_paths, tool_usage = await handle_tool_calls(

@@ -185,7 +185,7 @@ def _get_status_line(uid: int) -> str:
     settings = get_model_settings(uid, model) if model != "none" else None
     num_ctx = settings.num_ctx if settings else 8192
 
-    sp = build_full_system_prompt()
+    sp = build_full_system_prompt(num_ctx=num_ctx)
     est = _estimate_messages_tokens(sp, ctx)
     pct = min(est / num_ctx * 100, 100) if num_ctx > 0 else 0
 
@@ -421,7 +421,8 @@ async def _cmd_status(uid: int, args: str):
         lines.append(f"  Temp:    {settings.temperature}  |  top_p: {settings.top_p}")
         lines.append(f"  num_ctx: {settings.num_ctx}  |  num_predict: {settings.num_predict}")
 
-    sp = build_full_system_prompt()
+    num_ctx = settings.num_ctx if settings else 8192
+    sp = build_full_system_prompt(num_ctx=num_ctx)
     est = _estimate_messages_tokens(sp, ctx)
     if settings:
         bar = build_context_bar(est, settings.num_ctx, len(ctx))

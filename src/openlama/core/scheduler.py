@@ -78,7 +78,7 @@ async def execute_job(job: dict) -> str:
     settings = get_model_settings(uid, model)
 
     # Build minimal context (no conversation history)
-    system_prompt = build_full_system_prompt()
+    system_prompt = build_full_system_prompt(num_ctx=settings.num_ctx)
     messages = [
         {"role": "system", "content": system_prompt},
         {"role": "system", "content": (
