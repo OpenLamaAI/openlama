@@ -1254,10 +1254,36 @@ async def _process_input(uid: int, user_input: str):
     # Regular chat message
     request = ChatRequest(user_id=uid, text=user_input, channel="cli")
 
+    # Progress events displayed in real-time
+    _process_log: list[str] = []
+
+    async def _on_progress(event: str, detail: str):
+        """Real-time progress callback — updates status bar and logs events."""
+        if event == "thinking":
+            _status["text"] = "Thinking..."
+        elif event == "tool_start":
+            # Extract tool name from detail like "🔧 Running tool... (round 1, web_search)"
+            _status["text"] = detail.replace("\U0001f527 ", "") if detail else "Running tool..."
+            _process_log.append(f"  [dim]→ {detail}[/dim]")
+        elif event == "retry":
+            _status["text"] = "Retrying..."
+            _process_log.append(f"  [yellow]⚠ {detail}[/yellow]")
+        elif event == "fabrication":
+            _status["text"] = "Retrying (fabrication)..."
+            _process_log.append(f"  [red]⚠ {detail}[/red]")
+        elif event == "done":
+            _status["text"] = ""
+
     try:
         _status["text"] = "Thinking..."
-        response: ChatResponse = await chat(request)
+        response: ChatResponse = await chat(request, on_progress=_on_progress)
         _status["text"] = ""
+
+        # Show process log if any tool/retry events occurred
+        if _process_log:
+            await aprint(Rule(" Process ", style="dim"))
+            for line in _process_log:
+                await aprint(line)
 
         if response.content:
             try:

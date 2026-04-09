@@ -211,8 +211,22 @@ async def _call_with_auto_trim(
     raise last_error or RuntimeError("Chat failed after retries")
 
 
-async def chat(request: ChatRequest) -> ChatResponse:
-    """Main chat entry point — channel independent."""
+async def chat(request: ChatRequest, on_progress=None) -> ChatResponse:
+    """Main chat entry point — channel independent.
+
+    Args:
+        request: ChatRequest with user_id, text, images
+        on_progress: Optional async callback for status updates.
+            Called with (event: str, detail: str) where event is one of:
+            "thinking", "tool_start", "tool_done", "retry", "fabrication"
+    """
+    async def _notify(event: str, detail: str = ""):
+        if on_progress:
+            try:
+                await on_progress(event, detail)
+            except Exception:
+                pass
+
     uid = request.user_id
     user = get_user(uid)
     model = user.selected_model
@@ -258,6 +272,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     tools = format_tools_for_ollama(admin=True)
 
     # Call model — auto-trim context on overflow (400 error)
+    await _notify("thinking", "Reasoning...")
     resp = await _call_with_auto_trim(model, messages, settings, tools, think, uid, ctx_items)
 
     usage = TokenUsage(
@@ -267,6 +282,7 @@ async def chat(request: ChatRequest) -> ChatResponse:
     content = resp.get("content", "")
     tool_calls = resp.get("tool_calls", [])
     image_paths: list[str] = []
+    tool_calls_log: list[dict] = []
 
     # Incomplete turn / fabrication detection: ensure model actually uses tools
     if not tool_calls and tools:
@@ -278,9 +294,11 @@ async def chat(request: ChatRequest) -> ChatResponse:
             # Check fabrication first (model claims results without tool call)
             if is_fabricated_result(content, bool(tool_calls)):
                 logger.warning("fabricated result detected (retry %d)", _retry + 1)
+                await _notify("fabrication", f"Fabricated result detected — retrying ({_retry + 1})")
                 instruction = FABRICATION_INSTRUCTION
             elif is_incomplete_turn(content, bool(tool_calls)):
                 logger.info("incomplete turn detected (retry %d)", _retry + 1)
+                await _notify("retry", f"Incomplete turn — forcing tool call ({_retry + 1})")
                 instruction = RETRY_INSTRUCTION
             else:
                 break
@@ -296,11 +314,17 @@ async def chat(request: ChatRequest) -> ChatResponse:
                 break
 
     if tool_calls:
+        async def _tool_progress(status_text: str):
+            await _notify("tool_start", status_text)
+
         content, image_paths, tool_usage = await handle_tool_calls(
             uid, model, messages, tool_calls, settings, think, tools=tools,
+            on_progress=_tool_progress,
         )
         usage.prompt_tokens += tool_usage.prompt_tokens
         usage.completion_tokens += tool_usage.completion_tokens
+
+    await _notify("done", "")
 
     # Save context (generous limit to avoid DB bloat while preserving detail)
     answer = content.strip() if content else ""
@@ -309,8 +333,6 @@ async def chat(request: ChatRequest) -> ChatResponse:
     save_context(uid, ctx_items)
 
     # Build context bar using Ollama's actual token counts
-    # prompt_tokens from the initial call = full context window usage
-    # completion_tokens = tokens generated, which become part of next prompt
     base_prompt = resp.get("prompt_tokens", 0)
     base_completion = resp.get("completion_tokens", 0)
     context_used = base_prompt + base_completion if base_prompt > 0 else _estimate_messages_tokens(system_prompt, ctx_items)
