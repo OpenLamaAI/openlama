@@ -12,10 +12,10 @@ LOG_FILE = DATA_DIR / "openlama.log"
 
 
 def _read_pid() -> int | None:
+    """Read PID from PID file if the process is alive."""
     if PID_FILE.exists():
         try:
             pid = int(PID_FILE.read_text().strip())
-            # Check if process is alive
             os.kill(pid, 0)
             return pid
         except (ValueError, ProcessLookupError, PermissionError):
@@ -23,10 +23,64 @@ def _read_pid() -> int | None:
     return None
 
 
+def _find_running_process() -> int | None:
+    """Find a running openlama process by scanning OS process list.
+
+    Works across all platforms:
+    - macOS/Linux: `ps aux` + grep
+    - Windows: `tasklist` + findstr
+    - Termux: same as Linux
+    """
+    try:
+        if sys.platform == "win32":
+            result = subprocess.run(
+                ["tasklist", "/FI", "IMAGENAME eq python.exe", "/FO", "CSV"],
+                capture_output=True, text=True, timeout=5,
+            )
+            for line in result.stdout.splitlines():
+                if "openlama" in line.lower():
+                    # CSV: "python.exe","12345","Console","1","50,000 K"
+                    parts = line.strip('"').split('","')
+                    if len(parts) >= 2:
+                        return int(parts[1])
+        else:
+            result = subprocess.run(
+                ["ps", "ax", "-o", "pid,command"],
+                capture_output=True, text=True, timeout=5,
+            )
+            my_pid = os.getpid()
+            for line in result.stdout.splitlines():
+                line = line.strip()
+                if "openlama" not in line:
+                    continue
+                # Match: "openlama start" but not "openlama status/stop/logs/doctor"
+                if "openlama start" not in line and "openlama.cli start" not in line:
+                    continue
+                # Exclude management commands that contain "start" in args
+                if any(x in line for x in ("--install-service", "--uninstall-service", "status", "stop", "doctor")):
+                    continue
+                parts = line.split(None, 1)
+                if parts:
+                    pid = int(parts[0])
+                    if pid != my_pid:
+                        return pid
+    except Exception:
+        pass
+    return None
+
+
 def get_daemon_status() -> str:
+    """Get openlama process status. Checks PID file first, then scans OS processes."""
+    # 1. PID file (set by daemon mode -d)
     pid = _read_pid()
     if pid:
         return f"🟢 Running (PID {pid})"
+
+    # 2. OS process scan (catches launchd/systemd/Termux:Boot foreground mode)
+    pid = _find_running_process()
+    if pid:
+        return f"🟢 Running (PID {pid}, service)"
+
     return "🔴 Not running"
 
 
@@ -110,6 +164,9 @@ def start_daemon():
 def stop_daemon():
     """Stop the daemon."""
     pid = _read_pid()
+    if not pid:
+        # Try finding service-managed process
+        pid = _find_running_process()
     if not pid:
         print("🔴 openlama is not running")
         return
