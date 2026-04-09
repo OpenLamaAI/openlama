@@ -9,12 +9,13 @@ from openlama.config import get_config, IS_ANDROID
 _IS_WINDOWS = sys.platform == "win32"
 
 
-def _ensure_daemon_path():
-    """Ensure common binary paths are in PATH for daemon environments.
+def _ensure_daemon_env():
+    """Ensure essential environment variables for daemon processes.
 
-    launchd/systemd often start with a minimal PATH that misses user-installed
-    binaries like claude, tmux, git, etc.  This adds common locations once.
+    launchd/systemd often start with a minimal PATH and missing env vars
+    like USER, which breaks Keychain access for tools like Claude Code CLI.
     """
+    # PATH: add common binary locations
     extra = [
         "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
         str(Path.home() / ".local" / "bin"),
@@ -25,10 +26,18 @@ def _ensure_daemon_path():
     if additions:
         os.environ["PATH"] = ":".join(additions) + ":" + current
 
+    # USER: required for macOS Keychain access (Claude Code auth)
+    if not os.environ.get("USER"):
+        import getpass
+        try:
+            os.environ["USER"] = getpass.getuser()
+        except Exception:
+            pass
+
 
 def init_tools():
     """Import all tool modules to register them."""
-    _ensure_daemon_path()
+    _ensure_daemon_env()
     import openlama.tools.datetime_tool
     import openlama.tools.calculator
     import openlama.tools.web_search
