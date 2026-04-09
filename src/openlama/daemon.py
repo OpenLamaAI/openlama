@@ -240,21 +240,36 @@ def restart_daemon():
     """Restart the daemon. Uses service manager when available."""
     if _is_launchd_managed():
         pid = _find_running_process()
-        # kickstart -k = kill + restart in one atomic operation
+        # launchctl stop kills the process; KeepAlive=true auto-restarts it
         subprocess.run(
-            ["launchctl", "kickstart", "-k", "gui/" + str(os.getuid()) + "/com.openlama.agent"],
-            capture_output=True, timeout=15,
+            ["launchctl", "stop", "com.openlama.agent"],
+            capture_output=True, timeout=10,
+        )
+        if pid:
+            print(f"🔴 openlama daemon stopped (was PID {pid})")
+
+        # Wait for launchd to auto-restart (KeepAlive)
+        for _ in range(15):
+            time.sleep(1)
+            new_pid = _find_running_process()
+            if new_pid and new_pid != pid:
+                print(f"🟢 openlama daemon started (PID {new_pid})")
+                print(f"   Logs: {LOG_FILE}")
+                return
+
+        # Fallback: force start if KeepAlive didn't kick in
+        subprocess.run(
+            ["launchctl", "start", "com.openlama.agent"],
+            capture_output=True, timeout=10,
         )
         time.sleep(2)
         new_pid = _find_running_process()
-        if pid:
-            print(f"🔴 openlama daemon stopped (was PID {pid})")
         print(f"🟢 openlama daemon started (PID {new_pid or '?'})")
         print(f"   Logs: {LOG_FILE}")
         return
 
     if _is_systemd_managed():
-        subprocess.run(["systemctl", "restart", "openlama"], capture_output=True, timeout=15)
+        subprocess.run(["systemctl", "restart", "openlama"], capture_output=True, timeout=30)
         time.sleep(2)
         print("🟢 openlama daemon restarted (systemd)")
         return
