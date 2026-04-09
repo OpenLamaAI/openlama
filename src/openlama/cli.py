@@ -342,24 +342,52 @@ def update(ollama_only, self_only):
         else:
             console.print(f"  Updating Ollama v{current} -> v{latest}...")
             try:
-                if sys.platform == "darwin" and shutil.which("brew"):
-                    subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True)
-                elif sys.platform != "win32" and shutil.which("bash"):
-                    subprocess.run(
-                        ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-                        capture_output=True, text=True,
-                    )
+                upgraded = False
+                if sys.platform == "darwin":
+                    if shutil.which("brew"):
+                        subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True, timeout=300)
+                        subprocess.run(["brew", "services", "restart", "ollama"], capture_output=True, text=True, timeout=30)
+                        upgraded = True
+                    elif shutil.which("bash"):
+                        # macOS without brew: use official install script
+                        subprocess.run(
+                            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
+                            capture_output=True, text=True, timeout=300,
+                        )
+                        # Try pkill to restart (macOS .app or manual install)
+                        subprocess.run(["pkill", "-f", "ollama"], capture_output=True, timeout=5)
+                        upgraded = True
                 elif sys.platform == "win32":
                     console.print("  Windows: download from https://ollama.com/download/windows")
                     console.print()
                     return
+                elif shutil.which("bash"):
+                    # Linux / Termux: official install script
+                    subprocess.run(
+                        ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
+                        capture_output=True, text=True, timeout=300,
+                    )
+                    # Try systemctl first, fall back to pkill
+                    if shutil.which("systemctl"):
+                        subprocess.run(["systemctl", "restart", "ollama"], capture_output=True, text=True, timeout=30)
+                    else:
+                        subprocess.run(["pkill", "-f", "ollama"], capture_output=True, timeout=5)
+                    upgraded = True
                 else:
                     console.print(f"  Unsupported platform: {sys.platform}")
                     console.print()
                     return
 
-                info2 = asyncio.run(_check())
-                console.print(f"  [green]Updated: v{current} -> v{info2.get('current', '?')}[/green]")
+                if upgraded:
+                    import time
+                    time.sleep(3)
+
+                    info2 = asyncio.run(_check())
+                    new_current = info2.get("current", "?")
+                    if new_current != current and new_current != "?":
+                        console.print(f"  [green]Updated: v{current} -> v{new_current}[/green]")
+                    else:
+                        console.print(f"  Upgrade installed. Restart Ollama manually if version unchanged (v{new_current}).")
             except Exception as e:
                 console.print(f"  [red]Failed: {e}[/red]")
 
