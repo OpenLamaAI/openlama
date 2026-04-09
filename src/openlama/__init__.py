@@ -1,2 +1,2 @@
 """openlama — Personal AI agent bot."""
-__version__ = "0.1.77"
+__version__ = "0.1.78"
