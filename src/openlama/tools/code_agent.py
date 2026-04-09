@@ -124,6 +124,51 @@ async def _run_shell(cmd: str, timeout: int = 30) -> str:
         return f"Error: {e}"
 
 
+def _parse_claude_json(raw: str) -> dict:
+    """Parse Claude Code JSON output.
+
+    Claude --output-format json returns either:
+    - A JSON array (NDJSON stream wrapped in [])  → extract last 'result' object
+    - A single JSON object                        → return as-is
+    - NDJSON lines (one JSON per line)             → find the 'result' line
+    """
+    raw = raw.strip()
+    if not raw:
+        return {}
+
+    # Try single JSON object first
+    try:
+        parsed = json.loads(raw)
+        if isinstance(parsed, dict):
+            return parsed
+        if isinstance(parsed, list):
+            # Find the result object (last one with type "result")
+            for item in reversed(parsed):
+                if isinstance(item, dict) and item.get("type") == "result":
+                    return item
+            # Fallback: last dict in list
+            for item in reversed(parsed):
+                if isinstance(item, dict):
+                    return item
+            return {}
+    except json.JSONDecodeError:
+        pass
+
+    # Try NDJSON (one JSON object per line)
+    for line in reversed(raw.split("\n")):
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            obj = json.loads(line)
+            if isinstance(obj, dict) and obj.get("type") == "result":
+                return obj
+        except json.JSONDecodeError:
+            continue
+
+    return {}
+
+
 # ── Action: run (synchronous, subprocess) ────────────────────
 
 
@@ -160,9 +205,10 @@ async def _execute_run(prompt: str, cwd: str, new_session: bool,
         raw = stdout.decode("utf-8", errors="replace")
         err = stderr.decode("utf-8", errors="replace").strip()
 
-        # Parse JSON output
+        # Parse JSON output — claude outputs NDJSON (one JSON object per line)
+        # The last object with type "result" contains the final answer
         try:
-            output = json.loads(raw)
+            output = _parse_claude_json(raw)
             result_text = _truncate(output.get("result", "") or "", MAX_RESULT_CHARS)
             num_turns = output.get("num_turns", "N/A")
             cost = output.get("total_cost_usd", 0)
@@ -175,7 +221,7 @@ async def _execute_run(prompt: str, cwd: str, new_session: bool,
                 f"Turns: {num_turns} | Cost: ${cost:.4f}\n"
                 f"---\n{result_text}"
             )
-        except json.JSONDecodeError:
+        except Exception:
             # Fallback: raw output
             fallback = raw or err or "(no output)"
             return f"[Claude Code completed]\n---\n{_truncate(fallback, MAX_RESULT_CHARS)}"
@@ -220,7 +266,7 @@ async def _execute_parallel(tasks: list[dict], cwd: str,
             )
             raw = stdout.decode("utf-8", errors="replace")
             try:
-                output = json.loads(raw)
+                output = _parse_claude_json(raw)
                 return {
                     "name": name,
                     "result": _truncate(output.get("result", "") or "",
@@ -229,7 +275,7 @@ async def _execute_parallel(tasks: list[dict], cwd: str,
                     "turns": output.get("num_turns", 0),
                     "cost": output.get("total_cost_usd", 0),
                 }
-            except json.JSONDecodeError:
+            except Exception:
                 return {"name": name,
                         "result": _truncate(raw, MAX_PARALLEL_RESULT_CHARS),
                         "success": proc.returncode == 0,
