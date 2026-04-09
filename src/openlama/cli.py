@@ -443,14 +443,24 @@ def update(ollama_only, self_only):
                 upgraded = _update_ollama_binary(console, sys.platform)
                 if upgraded:
                     import time
-                    time.sleep(3)
+                    # Wait for Ollama to fully restart with new binary
+                    console.print("  Waiting for Ollama to restart...")
+                    new_current = current
+                    for attempt in range(10):
+                        time.sleep(2)
+                        try:
+                            info2 = asyncio.run(_check())
+                            new_current = info2.get("current", "?")
+                            if new_current != current and new_current != "?":
+                                break
+                        except Exception:
+                            continue
 
-                    info2 = asyncio.run(_check())
-                    new_current = info2.get("current", "?")
                     if new_current != current and new_current != "?":
                         console.print(f"  [green]Updated: v{current} -> v{new_current}[/green]")
                     else:
-                        console.print(f"  Upgrade installed. Restart Ollama manually if version unchanged (v{new_current}).")
+                        console.print(f"  Upgrade installed but version unchanged (v{new_current}).")
+                        console.print(f"  Try: brew services restart ollama")
             except Exception as e:
                 console.print(f"  [red]Failed: {e}[/red]")
 
