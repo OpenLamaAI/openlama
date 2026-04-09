@@ -169,6 +169,23 @@ def _parse_claude_json(raw: str) -> dict:
     return {}
 
 
+def _subprocess_env() -> dict:
+    """Build environment dict for claude subprocess.
+
+    Ensures USER and HOME are set — required for macOS Keychain access.
+    """
+    env = os.environ.copy()
+    if not env.get("USER"):
+        import getpass
+        try:
+            env["USER"] = getpass.getuser()
+        except Exception:
+            pass
+    if not env.get("HOME"):
+        env["HOME"] = str(Path.home())
+    return env
+
+
 # ── Action: run (synchronous, subprocess) ────────────────────
 
 
@@ -186,7 +203,7 @@ async def _execute_run(prompt: str, cwd: str, new_session: bool,
 
     try:
         proc = await asyncio.create_subprocess_exec(
-            *cmd, cwd=cwd,
+            *cmd, cwd=cwd, env=_subprocess_env(),
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -257,7 +274,7 @@ async def _execute_parallel(tasks: list[dict], cwd: str,
 
         try:
             proc = await asyncio.create_subprocess_exec(
-                *cmd, cwd=cwd,
+                *cmd, cwd=cwd, env=_subprocess_env(),
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
             )
