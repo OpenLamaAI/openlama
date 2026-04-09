@@ -589,17 +589,30 @@ async def pull_model_stream(uid: int, model: str):
 
 # ── Context summarization ─────────────────────────────────
 
+_SUMMARIZE_PROMPT = (
+    "Summarize the conversation concisely.\n"
+    "MUST PRESERVE:\n"
+    "- Active tasks and their current status\n"
+    "- The last thing the user requested and what was being done\n"
+    "- Decisions made and their rationale\n"
+    "- File paths, URLs, IDs, and identifiers exactly as written\n"
+    "- Any commitments or follow-ups promised\n"
+    "PRIORITIZE recent context over older history.\n"
+    "Keep the summary under 800 characters."
+)
+
+
 async def summarize_context(model: str, conversation_text: str) -> str:
     """Summarize a conversation for context compression."""
     messages = [
-        {"role": "system", "content": "Summarize the given conversation concisely, keeping only key points. Preserve important facts, decisions, code, and instructions. Keep the summary under 300 characters."},
+        {"role": "system", "content": _SUMMARIZE_PROMPT},
         {"role": "user", "content": conversation_text},
     ]
     payload = {
         "model": model,
         "messages": messages,
         "stream": False,
-        "options": {"num_predict": 512, "temperature": 0.3},
+        "options": {"num_predict": 1024, "temperature": 0.3},
     }
     r = await _api_post("/api/chat", json=payload)
     r.raise_for_status()

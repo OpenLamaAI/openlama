@@ -1,6 +1,8 @@
 """Context management — load, save, compress."""
 from __future__ import annotations
 
+import re
+
 from openlama.database import load_context, save_context, clear_context, get_model_settings
 from openlama.ollama_client import summarize_context
 from openlama.config import get_config_float
@@ -8,19 +10,39 @@ from openlama.logger import get_logger
 
 logger = get_logger("context")
 
+# Regex for CJK characters (Chinese, Japanese, Korean + fullwidth)
+_CJK_RE = re.compile(r'[\u3000-\u9fff\uac00-\ud7af\uff00-\uffef]')
 
-def _estimate_tokens(char_count: int) -> int:
-    # Korean/CJK text averages ~1.5 chars per token; English ~4 chars.
-    # Use conservative estimate (chars÷2) to trigger compression early
-    # rather than hitting Ollama's context limit.
-    return max(1, char_count // 2)
+
+def _estimate_tokens(text_or_charcount: str | int) -> int:
+    """Estimate token count with language awareness.
+
+    Accepts either a text string (for language-aware estimation) or
+    an integer character count (legacy fallback: uses chars/3 ratio).
+
+    CJK characters: ~1.5 chars per token (each char is usually one token)
+    Latin/ASCII: ~4 chars per token (words average ~4 chars + space)
+    Mixed content: weighted average of both.
+    """
+    if isinstance(text_or_charcount, int):
+        # Legacy fallback for callers passing character count
+        return max(1, text_or_charcount // 3)
+    text = text_or_charcount
+    if not text:
+        return 1  # minimum 1
+    cjk_count = len(_CJK_RE.findall(text))
+    latin_count = len(text) - cjk_count
+    return max(1, int(cjk_count / 1.5 + latin_count / 4))
 
 
 def _estimate_messages_tokens(system_prompt: str, ctx_items: list[dict], user_text: str = "") -> int:
-    total = len(system_prompt) + len(user_text)
+    """Estimate total tokens for system prompt + context + user text."""
+    parts = [system_prompt, user_text]
     for item in ctx_items:
-        total += len(item.get("u", "")) + len(item.get("a", ""))
-    return _estimate_tokens(total)
+        parts.append(item.get("u", ""))
+        parts.append(item.get("a", ""))
+    total_text = "".join(parts)
+    return _estimate_tokens(total_text)
 
 
 def build_context_bar(used_tokens: int, max_tokens: int, turn_count: int) -> str:
