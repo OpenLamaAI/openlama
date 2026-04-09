@@ -84,9 +84,35 @@ def get_daemon_status() -> str:
     return "🔴 Not running"
 
 
+def _is_launchd_managed() -> bool:
+    """Check if openlama is managed by launchd (macOS service)."""
+    if sys.platform != "darwin":
+        return False
+    try:
+        result = subprocess.run(
+            ["launchctl", "list", "com.openlama.agent"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.returncode == 0
+    except Exception:
+        return False
+
+
+def _is_systemd_managed() -> bool:
+    """Check if openlama is managed by systemd."""
+    try:
+        result = subprocess.run(
+            ["systemctl", "is-active", "openlama"],
+            capture_output=True, text=True, timeout=5,
+        )
+        return result.stdout.strip() == "active"
+    except Exception:
+        return False
+
+
 def start_daemon():
     """Run bot in background (fork on Unix, subprocess on Windows)."""
-    existing = _read_pid()
+    existing = _read_pid() or _find_running_process()
     if existing:
         print(f"openlama is already running (PID {existing})")
         sys.exit(1)
@@ -162,10 +188,30 @@ def start_daemon():
 
 
 def stop_daemon():
-    """Stop the daemon."""
+    """Stop the daemon. Handles launchd/systemd gracefully."""
+    # If managed by launchd, use launchctl to stop (prevents auto-restart)
+    if _is_launchd_managed():
+        pid = _find_running_process()
+        subprocess.run(["launchctl", "stop", "com.openlama.agent"], capture_output=True, timeout=10)
+        time.sleep(1)
+        # launchctl stop + KeepAlive means it will restart — we need to unload
+        # But we don't unload here (that would disable the service permanently)
+        # Instead, stop just kills and lets launchd restart if KeepAlive
+        if pid:
+            print(f"🔴 openlama daemon stopped (was PID {pid})")
+        else:
+            print("🔴 openlama daemon stopped")
+        PID_FILE.unlink(missing_ok=True)
+        return
+
+    if _is_systemd_managed():
+        subprocess.run(["systemctl", "stop", "openlama"], capture_output=True, timeout=10)
+        print("🔴 openlama daemon stopped (systemd)")
+        PID_FILE.unlink(missing_ok=True)
+        return
+
     pid = _read_pid()
     if not pid:
-        # Try finding service-managed process
         pid = _find_running_process()
     if not pid:
         print("🔴 openlama is not running")
@@ -176,7 +222,6 @@ def stop_daemon():
     else:
         os.kill(pid, signal.SIGTERM)
 
-    # Wait for process to exit
     for _ in range(10):
         try:
             os.kill(pid, 0)
@@ -192,7 +237,28 @@ def stop_daemon():
 
 
 def restart_daemon():
-    """Restart the daemon."""
+    """Restart the daemon. Uses service manager when available."""
+    if _is_launchd_managed():
+        pid = _find_running_process()
+        # kickstart -k = kill + restart in one atomic operation
+        subprocess.run(
+            ["launchctl", "kickstart", "-k", "gui/" + str(os.getuid()) + "/com.openlama.agent"],
+            capture_output=True, timeout=15,
+        )
+        time.sleep(2)
+        new_pid = _find_running_process()
+        if pid:
+            print(f"🔴 openlama daemon stopped (was PID {pid})")
+        print(f"🟢 openlama daemon started (PID {new_pid or '?'})")
+        print(f"   Logs: {LOG_FILE}")
+        return
+
+    if _is_systemd_managed():
+        subprocess.run(["systemctl", "restart", "openlama"], capture_output=True, timeout=15)
+        time.sleep(2)
+        print("🟢 openlama daemon restarted (systemd)")
+        return
+
     stop_daemon()
     time.sleep(1)
     start_daemon()

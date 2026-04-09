@@ -524,14 +524,13 @@ def update(ollama_only, self_only):
             except Exception as e:
                 console.print(f"  [red]Failed: {e}[/red]")
 
-    # Restart daemon if running
-    from openlama.daemon import _read_pid, _find_running_process
-    pid = _read_pid() or _find_running_process()
-    if pid and not ollama_only:
-        console.print("  [bold]Restarting daemon...[/bold]")
+    # Restart daemon if running (or managed by service manager)
+    from openlama.daemon import _read_pid, _find_running_process, _is_launchd_managed, _is_systemd_managed
+    is_running = _read_pid() or _find_running_process() or _is_launchd_managed() or _is_systemd_managed()
+    if is_running and not ollama_only:
+        console.print("\n  [bold]Restarting daemon...[/bold]")
         from openlama.daemon import restart_daemon
         restart_daemon()
-        console.print("  [green]Daemon restarted.[/green]")
 
     console.print()
 
