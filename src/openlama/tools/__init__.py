@@ -1,5 +1,7 @@
 """Tool registration — import all tools to trigger registration."""
+import os
 import sys
+from pathlib import Path
 
 from openlama.tools.registry import get_all_tools, get_tool, execute_tool, format_tools_for_ollama
 from openlama.config import get_config, IS_ANDROID
@@ -7,8 +9,26 @@ from openlama.config import get_config, IS_ANDROID
 _IS_WINDOWS = sys.platform == "win32"
 
 
+def _ensure_daemon_path():
+    """Ensure common binary paths are in PATH for daemon environments.
+
+    launchd/systemd often start with a minimal PATH that misses user-installed
+    binaries like claude, tmux, git, etc.  This adds common locations once.
+    """
+    extra = [
+        "/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin",
+        str(Path.home() / ".local" / "bin"),
+        str(Path.home() / ".claude" / "bin"),
+    ]
+    current = os.environ.get("PATH", "")
+    additions = [p for p in extra if p not in current and Path(p).is_dir()]
+    if additions:
+        os.environ["PATH"] = ":".join(additions) + ":" + current
+
+
 def init_tools():
     """Import all tool modules to register them."""
+    _ensure_daemon_path()
     import openlama.tools.datetime_tool
     import openlama.tools.calculator
     import openlama.tools.web_search
