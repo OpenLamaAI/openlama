@@ -29,6 +29,11 @@ def init_tools():
     # tmux is Unix-only (no Windows equivalent)
     if not _IS_WINDOWS:
         import openlama.tools.tmux_tool
+    # code_agent: requires tmux + claude CLI (Unix-only)
+    if not _IS_WINDOWS:
+        import shutil
+        if shutil.which("tmux") and shutil.which("claude"):
+            import openlama.tools.code_agent
     # Conditional tools — whisper: auto-detect if faster-whisper is installed
     stt_config = get_config("stt_enabled", "auto").lower()
     if stt_config != "false":
