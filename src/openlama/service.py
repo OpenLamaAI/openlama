@@ -5,9 +5,30 @@ import subprocess
 from pathlib import Path
 from openlama.config import DATA_DIR, TERMUX
 
-def _find_openlama_bin() -> str:
+def _find_openlama_bin() -> tuple[list[str], str]:
+    """Find openlama executable. Returns (args_list, display_path).
+
+    args_list: split command suitable for ProgramArguments / ExecStart
+    display_path: human-readable path string
+    """
     path = shutil.which("openlama")
-    return path or sys.executable + " -m openlama.cli"
+    if not path:
+        # Check common uv/pipx install locations
+        from pathlib import Path as _P
+        for p in [
+            _P.home() / ".local" / "bin" / "openlama",
+            _P("/opt/homebrew/bin/openlama"),
+            _P("/usr/local/bin/openlama"),
+        ]:
+            if p.exists():
+                path = str(p)
+                break
+
+    if path:
+        return [path], path
+
+    # Fallback: use python -m (split into separate args)
+    return [sys.executable, "-m", "openlama.cli"], f"{sys.executable} -m openlama.cli"
 
 def install():
     """Register as OS service."""
@@ -34,12 +55,13 @@ def uninstall():
         _uninstall_windows()
 
 def _install_windows():
-    bin_path = _find_openlama_bin()
+    args_list, display = _find_openlama_bin()
     task_name = "openlama"
+    cmd_str = " ".join(f'"{a}"' for a in args_list + ["start"])
     subprocess.run([
         "schtasks", "/create",
         "/tn", task_name,
-        "/tr", f'"{bin_path}" start',
+        "/tr", cmd_str,
         "/sc", "onlogon",
         "/rl", "highest",
         "/f",
@@ -56,8 +78,11 @@ def _install_launchd():
     plist_dir = Path.home() / "Library" / "LaunchAgents"
     plist_dir.mkdir(parents=True, exist_ok=True)
     plist = plist_dir / "com.openlama.agent.plist"
-    bin_path = _find_openlama_bin()
+    args_list, display = _find_openlama_bin()
     log = str(DATA_DIR / "openlama.log")
+
+    # Build ProgramArguments XML entries (each arg as separate <string>)
+    args_xml = "\n".join(f"        <string>{a}</string>" for a in args_list + ["start"])
 
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -67,8 +92,7 @@ def _install_launchd():
     <string>com.openlama.agent</string>
     <key>ProgramArguments</key>
     <array>
-        <string>{bin_path}</string>
-        <string>start</string>
+{args_xml}
     </array>
     <key>RunAtLoad</key>
     <true/>
@@ -84,6 +108,7 @@ def _install_launchd():
     plist.write_text(content)
     subprocess.run(["launchctl", "load", str(plist)])
     print(f"✅ Service registered: {plist}")
+    print(f"   Binary: {display}")
     print("   openlama will start on login")
 
 def _uninstall_launchd():
@@ -99,14 +124,15 @@ def _install_systemd():
     unit_dir = Path.home() / ".config" / "systemd" / "user"
     unit_dir.mkdir(parents=True, exist_ok=True)
     unit = unit_dir / "openlama.service"
-    bin_path = _find_openlama_bin()
+    args_list, display = _find_openlama_bin()
+    exec_start = " ".join(args_list + ["start"])
 
     content = f"""[Unit]
 Description=openlama — Personal AI Agent Bot
 After=network.target
 
 [Service]
-ExecStart={bin_path} start
+ExecStart={exec_start}
 Restart=on-failure
 RestartSec=5
 
@@ -134,11 +160,12 @@ def _install_termux():
     """Create Termux:Boot auto-start script."""
     boot_dir = Path.home() / ".termux" / "boot"
     boot_dir.mkdir(parents=True, exist_ok=True)
-    bin_path = _find_openlama_bin()
+    args_list, display = _find_openlama_bin()
     log = str(DATA_DIR / "openlama.log")
     from openlama.config import is_ollama_remote
 
     script = boot_dir / "start-openlama.sh"
+    cmd_str = " ".join(args_list + ["start"])
     lines = [
         "#!/data/data/com.termux/files/usr/bin/bash",
         "# openlama auto-start script (Termux:Boot)",
@@ -149,7 +176,7 @@ def _install_termux():
             "ollama serve > /dev/null 2>&1 &",
             "sleep 3",
         ]
-    lines.append(f"{bin_path} start >> {log} 2>&1 &")
+    lines.append(f"{cmd_str} >> {log} 2>&1 &")
 
     script.write_text("\n".join(lines) + "\n")
     script.chmod(0o755)
