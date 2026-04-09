@@ -36,7 +36,7 @@ def _check_for_update():
             data = cache_file.read_text().strip().split("|")
             if len(data) == 2:
                 ts, cached_ver = float(data[0]), data[1]
-                if time.time() - ts < 3600:
+                if time.time() - ts < 300:  # 5 minutes
                     if cached_ver and _ver_tuple(cached_ver) > _ver_tuple(__version__):
                         click.echo(f"  ⬆ Update available: v{__version__} → v{cached_ver}  (openlama update)")
                     return
@@ -415,53 +415,72 @@ def update(ollama_only, self_only):
     if not ollama_only:
         console.print(f"\n  [bold]Updating openlama...[/bold] (current: v{old_ver})")
         try:
-            uv_bin = shutil.which("uv")
-            pip_bin = shutil.which("pip3") or shutil.which("pip")
-            pipx_bin = shutil.which("pipx")
-
-            # Detect install method by checking where openlama binary lives
-            openlama_bin = shutil.which("openlama") or ""
-            method = "pip"  # default fallback
-            if uv_bin and "uv" in openlama_bin.lower():
-                method = "uv_tool"
-            elif uv_bin:
-                # Check if uv tool list contains openlama
-                check = subprocess.run([uv_bin, "tool", "list"], capture_output=True, text=True, timeout=10)
-                if check.returncode == 0 and "openlama" in check.stdout:
-                    method = "uv_tool"
-            if pipx_bin and method == "pip":
-                check = subprocess.run([pipx_bin, "list"], capture_output=True, text=True, timeout=10)
-                if check.returncode == 0 and "openlama" in check.stdout:
-                    method = "pipx"
-
-            console.print(f"  [dim]Install method: {method}[/dim]")
-
-            if method == "uv_tool":
-                result = subprocess.run(
-                    [uv_bin, "tool", "install", "openlama", "--force"],
-                    capture_output=True, text=True, timeout=120,
-                )
-                if result.returncode == 0:
-                    ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
-                    new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
-                    if new_ver != old_ver:
-                        console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
-                    else:
-                        console.print(f"  Already up to date (v{old_ver})")
+            # Check PyPI for latest version first
+            import httpx as _httpx
+            latest_ver = None
+            try:
+                r = _httpx.get("https://pypi.org/simple/openlama/", timeout=5,
+                               headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+                if r.status_code == 200:
+                    data = r.json()
+                    versions = [v for v in data.get("versions", []) if not any(c in v for c in ("a", "b", "rc", "dev"))]
+                    if versions:
+                        latest_ver = sorted(versions, key=_ver_tuple)[-1]
                 else:
-                    console.print(f"  [red]uv tool install failed, trying pip...[/red]")
-                    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama"], capture_output=True, timeout=120)
-                    console.print(f"  Updated via pip fallback (was v{old_ver})")
-            elif method == "pipx":
-                subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
+                    # Fallback: scrape simple index
+                    r2 = _httpx.get("https://pypi.org/simple/openlama/", timeout=5)
+                    import re
+                    found = re.findall(r'openlama-([\d.]+)', r2.text)
+                    if found:
+                        latest_ver = sorted(set(found), key=_ver_tuple)[-1]
+            except Exception:
+                pass
+
+            if latest_ver and _ver_tuple(latest_ver) <= _ver_tuple(old_ver):
+                console.print(f"  Already up to date (v{old_ver})")
+            elif latest_ver:
+                console.print(f"  [dim]Latest: v{latest_ver}[/dim]")
+
+                uv_bin = shutil.which("uv")
+                pipx_bin = shutil.which("pipx")
+
+                # Detect install method
+                openlama_bin = shutil.which("openlama") or ""
+                method = "pip"
+                if uv_bin:
+                    check = subprocess.run([uv_bin, "tool", "list"], capture_output=True, text=True, timeout=10)
+                    if check.returncode == 0 and "openlama" in check.stdout:
+                        method = "uv_tool"
+                if pipx_bin and method == "pip":
+                    check = subprocess.run([pipx_bin, "list"], capture_output=True, text=True, timeout=10)
+                    if check.returncode == 0 and "openlama" in check.stdout:
+                        method = "pipx"
+
+                console.print(f"  [dim]Install method: {method}[/dim]")
+
+                if method == "uv_tool":
+                    result = subprocess.run(
+                        [uv_bin, "tool", "install", f"openlama>={latest_ver}", "--force", "--refresh"],
+                        capture_output=True, text=True, timeout=120,
+                    )
+                    if result.returncode != 0:
+                        console.print(f"  [yellow]uv failed, trying pip...[/yellow]")
+                        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
+                                       capture_output=True, timeout=120)
+                elif method == "pipx":
+                    subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
+                else:
+                    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
+                                   capture_output=True, timeout=120)
+
                 ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
                 new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
-                console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
+                if new_ver != old_ver:
+                    console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
+                else:
+                    console.print(f"  [yellow]Version unchanged (v{new_ver}). Try: uv tool install openlama --force --refresh[/yellow]")
             else:
-                subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama"], capture_output=True, timeout=120)
-                ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
-                new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
-                console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
+                console.print(f"  Could not check PyPI. Try: uv tool install openlama --force --refresh")
         except Exception as e:
             console.print(f"  [red]Failed: {e}[/red]")
 
