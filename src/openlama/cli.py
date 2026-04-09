@@ -42,7 +42,8 @@ def _check_for_update():
                     return
 
         import httpx
-        r = httpx.get("https://pypi.org/pypi/openlama/json", timeout=3)
+        r = httpx.get("https://pypi.org/pypi/openlama/json", timeout=3,
+                      headers={"Cache-Control": "no-cache"})
         if r.status_code == 200:
             latest = r.json().get("info", {}).get("version", "")
             if cache_file:
@@ -415,24 +416,25 @@ def update(ollama_only, self_only):
     if not ollama_only:
         console.print(f"\n  [bold]Updating openlama...[/bold] (current: v{old_ver})")
         try:
-            # Check PyPI for latest version first
+            # Check PyPI for latest version — JSON API updates faster than Simple API
             import httpx as _httpx
             latest_ver = None
             try:
-                r = _httpx.get("https://pypi.org/simple/openlama/", timeout=5,
-                               headers={"Accept": "application/vnd.pypi.simple.v1+json"})
+                # Primary: JSON API (faster CDN propagation)
+                r = _httpx.get("https://pypi.org/pypi/openlama/json", timeout=5,
+                               headers={"Cache-Control": "no-cache"})
                 if r.status_code == 200:
-                    data = r.json()
-                    versions = [v for v in data.get("versions", []) if not any(c in v for c in ("a", "b", "rc", "dev"))]
-                    if versions:
-                        latest_ver = sorted(versions, key=_ver_tuple)[-1]
-                else:
-                    # Fallback: scrape simple index
-                    r2 = _httpx.get("https://pypi.org/simple/openlama/", timeout=5)
-                    import re
-                    found = re.findall(r'openlama-([\d.]+)', r2.text)
-                    if found:
-                        latest_ver = sorted(set(found), key=_ver_tuple)[-1]
+                    latest_ver = r.json().get("info", {}).get("version", "")
+                if not latest_ver:
+                    # Fallback: Simple API
+                    r2 = _httpx.get("https://pypi.org/simple/openlama/", timeout=5,
+                                    headers={"Accept": "application/vnd.pypi.simple.v1+json",
+                                             "Cache-Control": "no-cache"})
+                    if r2.status_code == 200:
+                        data = r2.json()
+                        versions = [v for v in data.get("versions", []) if not any(c in v for c in ("a", "b", "rc", "dev"))]
+                        if versions:
+                            latest_ver = sorted(versions, key=_ver_tuple)[-1]
             except Exception:
                 pass
 
