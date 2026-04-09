@@ -277,6 +277,85 @@ def status():
     console.print(Panel("\n".join(lines), title=f"openlama v{__version__}", border_style="blue"))
 
 
+def _detect_ollama_install() -> str:
+    """Detect how Ollama was installed. Returns: 'brew', 'app', 'script', 'unknown'."""
+    import shutil
+    import subprocess
+    import sys
+
+    if sys.platform != "darwin" and sys.platform != "linux":
+        return "unknown"
+
+    ollama_path = shutil.which("ollama") or ""
+
+    # macOS detection
+    if sys.platform == "darwin":
+        # Check if installed via Homebrew (binary lives in Cellar)
+        if ollama_path and "/Cellar/" in ollama_path:
+            return "brew"
+        if shutil.which("brew"):
+            try:
+                result = subprocess.run(
+                    ["brew", "list", "ollama"],
+                    capture_output=True, text=True, timeout=10,
+                )
+                if result.returncode == 0 and "Cellar" in result.stdout:
+                    return "brew"
+            except Exception:
+                pass
+        # Check if installed as .app (Ollama.app bundles its own binary)
+        from pathlib import Path
+        if Path("/Applications/Ollama.app").exists():
+            return "app"
+
+    # Linux / fallback: assume install script
+    if ollama_path:
+        return "script"
+
+    return "unknown"
+
+
+def _update_ollama_binary(console, platform: str) -> bool:
+    """Update Ollama binary and restart. Returns True if upgrade was attempted."""
+    import subprocess
+    import shutil
+
+    method = _detect_ollama_install()
+    console.print(f"  [dim]Install method: {method}[/dim]")
+
+    if platform == "win32":
+        console.print("  Windows: download from https://ollama.com/download/windows")
+        return False
+
+    if method == "brew":
+        subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True, timeout=300)
+        subprocess.run(["brew", "services", "restart", "ollama"], capture_output=True, text=True, timeout=30)
+        return True
+
+    if method == "app":
+        # Ollama.app: no CLI updater — the app auto-updates on launch
+        console.print("  Ollama.app detected — close and reopen Ollama.app to update,")
+        console.print("  or switch to brew: brew install ollama && brew services start ollama")
+        # Try to at least restart the running process
+        subprocess.run(["pkill", "-f", "Ollama"], capture_output=True, timeout=5)
+        return False
+
+    if method == "script" or shutil.which("bash"):
+        # Linux / macOS without brew: official install script
+        subprocess.run(
+            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
+            capture_output=True, text=True, timeout=300,
+        )
+        if shutil.which("systemctl"):
+            subprocess.run(["systemctl", "restart", "ollama"], capture_output=True, text=True, timeout=30)
+        else:
+            subprocess.run(["pkill", "-f", "ollama"], capture_output=True, timeout=5)
+        return True
+
+    console.print(f"  Could not detect install method. Visit https://ollama.com")
+    return False
+
+
 # ─── Update command ─────────────────────────────
 
 @main.command()
@@ -296,33 +375,52 @@ def update(ollama_only, self_only):
         console.print(f"\n  [bold]Updating openlama...[/bold] (current: v{old_ver})")
         try:
             uv_bin = shutil.which("uv")
-            if uv_bin:
+            pip_bin = shutil.which("pip3") or shutil.which("pip")
+            pipx_bin = shutil.which("pipx")
+
+            # Detect install method by checking where openlama binary lives
+            openlama_bin = shutil.which("openlama") or ""
+            method = "pip"  # default fallback
+            if uv_bin and "uv" in openlama_bin.lower():
+                method = "uv_tool"
+            elif uv_bin:
+                # Check if uv tool list contains openlama
+                check = subprocess.run([uv_bin, "tool", "list"], capture_output=True, text=True, timeout=10)
+                if check.returncode == 0 and "openlama" in check.stdout:
+                    method = "uv_tool"
+            if pipx_bin and method == "pip":
+                check = subprocess.run([pipx_bin, "list"], capture_output=True, text=True, timeout=10)
+                if check.returncode == 0 and "openlama" in check.stdout:
+                    method = "pipx"
+
+            console.print(f"  [dim]Install method: {method}[/dim]")
+
+            if method == "uv_tool":
                 result = subprocess.run(
-                    [uv_bin, "tool", "upgrade", "openlama"],
-                    capture_output=True, text=True,
+                    [uv_bin, "tool", "install", "openlama", "--force"],
+                    capture_output=True, text=True, timeout=120,
                 )
                 if result.returncode == 0:
-                    ver_out = subprocess.run(
-                        [uv_bin, "tool", "run", "openlama", "--version"],
-                        capture_output=True, text=True,
-                    )
+                    ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
                     new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
                     if new_ver != old_ver:
                         console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
                     else:
                         console.print(f"  Already up to date (v{old_ver})")
                 else:
-                    subprocess.run(
-                        [sys.executable, "-m", "pip", "install", "--upgrade", "openlama"],
-                        capture_output=True,
-                    )
-                    console.print(f"  Updated via pip (was v{old_ver})")
+                    console.print(f"  [red]uv tool install failed, trying pip...[/red]")
+                    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama"], capture_output=True, timeout=120)
+                    console.print(f"  Updated via pip fallback (was v{old_ver})")
+            elif method == "pipx":
+                subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
+                ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
+                new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
+                console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
             else:
-                subprocess.run(
-                    [sys.executable, "-m", "pip", "install", "--upgrade", "openlama"],
-                    capture_output=True,
-                )
-                console.print(f"  Updated via pip (was v{old_ver})")
+                subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama"], capture_output=True, timeout=120)
+                ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
+                new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
+                console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
         except Exception as e:
             console.print(f"  [red]Failed: {e}[/red]")
 
@@ -342,42 +440,7 @@ def update(ollama_only, self_only):
         else:
             console.print(f"  Updating Ollama v{current} -> v{latest}...")
             try:
-                upgraded = False
-                if sys.platform == "darwin":
-                    if shutil.which("brew"):
-                        subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True, timeout=300)
-                        subprocess.run(["brew", "services", "restart", "ollama"], capture_output=True, text=True, timeout=30)
-                        upgraded = True
-                    elif shutil.which("bash"):
-                        # macOS without brew: use official install script
-                        subprocess.run(
-                            ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-                            capture_output=True, text=True, timeout=300,
-                        )
-                        # Try pkill to restart (macOS .app or manual install)
-                        subprocess.run(["pkill", "-f", "ollama"], capture_output=True, timeout=5)
-                        upgraded = True
-                elif sys.platform == "win32":
-                    console.print("  Windows: download from https://ollama.com/download/windows")
-                    console.print()
-                    return
-                elif shutil.which("bash"):
-                    # Linux / Termux: official install script
-                    subprocess.run(
-                        ["bash", "-c", "curl -fsSL https://ollama.com/install.sh | sh"],
-                        capture_output=True, text=True, timeout=300,
-                    )
-                    # Try systemctl first, fall back to pkill
-                    if shutil.which("systemctl"):
-                        subprocess.run(["systemctl", "restart", "ollama"], capture_output=True, text=True, timeout=30)
-                    else:
-                        subprocess.run(["pkill", "-f", "ollama"], capture_output=True, timeout=5)
-                    upgraded = True
-                else:
-                    console.print(f"  Unsupported platform: {sys.platform}")
-                    console.print()
-                    return
-
+                upgraded = _update_ollama_binary(console, sys.platform)
                 if upgraded:
                     import time
                     time.sleep(3)
