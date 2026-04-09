@@ -28,11 +28,13 @@ def set_channel_sender(fn: Callable[[int, str], Awaitable[None]]):
 
 
 def compute_next_run(cron_expr: str, base_time: float = 0) -> int:
-    """Compute next run timestamp from a cron expression."""
-    base = base_time if base_time > 0 else time.time()
+    """Compute next run timestamp from a cron expression (local timezone)."""
+    from datetime import datetime
+    base_dt = datetime.fromtimestamp(base_time) if base_time > 0 else datetime.now()
     try:
-        cron = croniter(cron_expr, base)
-        return int(cron.get_next(float))
+        cron = croniter(cron_expr, base_dt)
+        next_dt = cron.get_next(datetime)
+        return int(next_dt.timestamp())
     except Exception as e:
         logger.error("invalid cron expression '%s': %s", cron_expr, e)
         return 0
