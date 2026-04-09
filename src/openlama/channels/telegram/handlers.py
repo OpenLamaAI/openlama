@@ -406,6 +406,14 @@ async def compress_context(uid: int, user) -> str:
 # Password / login flow
 # ══════════════════════════════════════════════════════════
 
+async def _delete_message_safe(message):
+    """Delete a message silently (ignore errors like missing permissions)."""
+    try:
+        await message.delete()
+    except Exception:
+        pass
+
+
 async def _handle_password_flow(update: Update, user: UserState, text: str) -> bool:
     """Handle password-related state flows. Returns True if handled."""
     uid = user.telegram_id
@@ -415,12 +423,14 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
 
     if user.state == "await_password":
         if is_login_locked(user):
-            await update.message.reply_text(f"Login locked: {user.login_lock_until - now_ts()}s remaining")
+            await update.message.reply_text(f"🔒 Login locked: {user.login_lock_until - now_ts()}s remaining")
+            await _delete_message_safe(update.message)
             return True
 
         stored_hash = get_admin_password_hash()
         if not stored_hash:
-            await update.message.reply_text("Server password not set")
+            await update.message.reply_text("⚠️ Server password not set")
+            await _delete_message_safe(update.message)
             return True
 
         if verify_password(text, stored_hash):
@@ -429,7 +439,6 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
             # AllowList: auto-register on first successful login
             allowed = get_allowed_ids()
             if not allowed:
-                # First user ever -- add to allow list
                 add_allowed_id(uid)
                 logger.info("First login: added uid=%d to allow list.", uid)
             elif uid not in allowed:
@@ -457,7 +466,7 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
                     lang_list = "\n".join(f"  {i}. {name}" for i, (_, name) in enumerate(LANGUAGES, 1))
                     update_user(uid, state="await_profile_language")
                     await update.message.reply_text(
-                        f"Authentication successful. Model: {selected or '(none selected)'}\n\n"
+                        f"✅ Authentication successful. Model: {selected or '(none selected)'}\n\n"
                         f"--- Profile Setup (Step 1/3) ---\n"
                         f"Select your language:\n{lang_list}\n\n"
                         f"Reply with a number or type a language name.",
@@ -466,7 +475,7 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
                 elif not _has_real_content(d / "SOUL.md"):
                     update_user(uid, state="await_profile_soul")
                     await update.message.reply_text(
-                        f"Authentication successful. Model: {selected or '(none selected)'}\n\n"
+                        f"✅ Authentication successful. Model: {selected or '(none selected)'}\n\n"
                         f"--- Profile Setup (Step 3/3) ---\n"
                         f"{PROFILE_QUESTIONS['soul']}",
                         reply_markup=main_menu_keyboard(True),
@@ -484,25 +493,30 @@ async def _handle_password_flow(update: Update, user: UserState, text: str) -> b
             else:
                 update_user(uid, login_fail_count=fail)
                 await update.message.reply_text(f"❌ Wrong password ({fail}/{login_max_fails})")
+        # Delete the password message after responding
+        await _delete_message_safe(update.message)
         return True
 
     if user.state == "await_current_password_for_change":
         stored_hash = get_admin_password_hash()
         if not stored_hash or not verify_password(text, stored_hash):
             update_user(uid, state="")
-            await update.message.reply_text("Current password incorrect. Try /setpassword again")
-            return True
-        update_user(uid, state="await_new_password")
-        await update.message.reply_text("Enter new password (minimum 8 characters)")
+            await update.message.reply_text("❌ Current password incorrect. Try /setpassword again")
+        else:
+            update_user(uid, state="await_new_password")
+            await update.message.reply_text("🔑 Enter new password (minimum 8 characters)")
+        await _delete_message_safe(update.message)
         return True
 
     if user.state == "await_new_password":
         if len(text) < 8:
-            await update.message.reply_text("Must be at least 8 characters")
+            await update.message.reply_text("⚠️ Must be at least 8 characters")
+            await _delete_message_safe(update.message)
             return True
         set_admin_password_hash(hash_password(text))
         update_user(uid, state="")
         await update.message.reply_text("✅ Password changed successfully")
+        await _delete_message_safe(update.message)
         return True
 
     # Prompt file editing
