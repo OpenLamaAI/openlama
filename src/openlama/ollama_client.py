@@ -71,20 +71,37 @@ def start_ollama_service() -> tuple[bool, str]:
     import shutil
     import subprocess
     import sys
+    from pathlib import Path
 
     ollama_bin = shutil.which("ollama")
+    # Fallback: check known homebrew paths when PATH is incomplete (SSH)
+    if not ollama_bin:
+        for p in ["/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"]:
+            if Path(p).exists():
+                ollama_bin = p
+                break
     if not ollama_bin:
         return False, "ollama not found"
 
+    def _find_brew() -> str | None:
+        b = shutil.which("brew")
+        if b:
+            return b
+        for p in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]:
+            if Path(p).exists():
+                return p
+        return None
+
     # macOS: check if installed via brew
-    if sys.platform == "darwin" and shutil.which("brew"):
+    brew_bin = _find_brew() if sys.platform == "darwin" else None
+    if brew_bin:
         try:
             result = subprocess.run(
-                ["brew", "list", "ollama"], capture_output=True, text=True, timeout=10,
+                [brew_bin, "list", "ollama"], capture_output=True, text=True, timeout=10,
             )
             if result.returncode == 0:
                 subprocess.run(
-                    ["brew", "services", "start", "ollama"],
+                    [brew_bin, "services", "start", "ollama"],
                     capture_output=True, text=True, timeout=15,
                 )
                 return True, "brew"

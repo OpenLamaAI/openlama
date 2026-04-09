@@ -277,38 +277,78 @@ def status():
     console.print(Panel("\n".join(lines), title=f"openlama v{__version__}", border_style="blue"))
 
 
+def _find_brew() -> str | None:
+    """Find brew binary even when PATH is incomplete (e.g. SSH non-interactive)."""
+    import shutil
+    b = shutil.which("brew")
+    if b:
+        return b
+    from pathlib import Path
+    for p in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"]:
+        if Path(p).exists():
+            return p
+    return None
+
+
 def _detect_ollama_install() -> str:
     """Detect how Ollama was installed. Returns: 'brew', 'app', 'script', 'unknown'."""
     import shutil
     import subprocess
     import sys
+    from pathlib import Path
 
     if sys.platform != "darwin" and sys.platform != "linux":
         return "unknown"
 
     ollama_path = shutil.which("ollama") or ""
 
+    # Also check known homebrew paths when PATH is incomplete (SSH)
+    if not ollama_path:
+        for p in ["/opt/homebrew/bin/ollama", "/usr/local/bin/ollama"]:
+            if Path(p).exists():
+                ollama_path = p
+                break
+
     # macOS detection
     if sys.platform == "darwin":
-        # Check if installed via Homebrew (binary lives in Cellar)
-        if ollama_path and "/Cellar/" in ollama_path:
-            return "brew"
-        if shutil.which("brew"):
+        # Check if binary lives in Cellar (definitive brew indicator)
+        if ollama_path:
+            try:
+                resolved = str(Path(ollama_path).resolve())
+                if "/Cellar/" in resolved:
+                    return "brew"
+            except Exception:
+                pass
+
+        # Check via brew list
+        brew_bin = _find_brew()
+        if brew_bin:
             try:
                 result = subprocess.run(
-                    ["brew", "list", "ollama"],
+                    [brew_bin, "list", "ollama"],
                     capture_output=True, text=True, timeout=10,
                 )
                 if result.returncode == 0 and "Cellar" in result.stdout:
                     return "brew"
             except Exception:
                 pass
-        # Check if installed as .app (Ollama.app bundles its own binary)
-        from pathlib import Path
+
+        # Check if installed as .app
         if Path("/Applications/Ollama.app").exists():
             return "app"
 
-    # Linux / fallback: assume install script
+    # Linux: check systemd service
+    if sys.platform == "linux" and shutil.which("systemctl"):
+        try:
+            result = subprocess.run(
+                ["systemctl", "is-enabled", "ollama"],
+                capture_output=True, text=True, timeout=5,
+            )
+            if result.returncode == 0:
+                return "systemd"
+        except Exception:
+            pass
+
     if ollama_path:
         return "script"
 
@@ -328,8 +368,9 @@ def _update_ollama_binary(console, platform: str) -> bool:
         return False
 
     if method == "brew":
-        subprocess.run(["brew", "upgrade", "ollama"], capture_output=True, text=True, timeout=300)
-        subprocess.run(["brew", "services", "restart", "ollama"], capture_output=True, text=True, timeout=30)
+        brew_bin = _find_brew() or "brew"
+        subprocess.run([brew_bin, "upgrade", "ollama"], capture_output=True, text=True, timeout=300)
+        subprocess.run([brew_bin, "services", "restart", "ollama"], capture_output=True, text=True, timeout=30)
         return True
 
     if method == "app":
