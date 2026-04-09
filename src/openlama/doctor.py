@@ -179,12 +179,32 @@ async def fix_ollama():
         return False
 
     try:
-        proc = await asyncio.create_subprocess_exec(
-            ollama_bin, "serve",
-            stdout=asyncio.subprocess.DEVNULL,
-            stderr=asyncio.subprocess.DEVNULL,
-        )
-        # Wait a bit for startup
+        import sys
+        import subprocess
+
+        started = False
+        # macOS: prefer brew services if installed via brew
+        if sys.platform == "darwin" and shutil.which("brew"):
+            result = subprocess.run(
+                ["brew", "list", "ollama"], capture_output=True, text=True, timeout=10,
+            )
+            if result.returncode == 0:
+                subprocess.run(["brew", "services", "start", "ollama"], capture_output=True, text=True, timeout=15)
+                started = True
+
+        # Linux: prefer systemctl
+        if not started and shutil.which("systemctl"):
+            subprocess.run(["systemctl", "start", "ollama"], capture_output=True, text=True, timeout=15)
+            started = True
+
+        # Fallback: direct ollama serve
+        if not started:
+            await asyncio.create_subprocess_exec(
+                ollama_bin, "serve",
+                stdout=asyncio.subprocess.DEVNULL,
+                stderr=asyncio.subprocess.DEVNULL,
+            )
+
         for _ in range(10):
             await asyncio.sleep(1)
             from openlama.ollama_client import ollama_alive
