@@ -221,17 +221,38 @@ def chat():
 def status():
     """Show process, Ollama, ComfyUI, MCP, and skills status."""
     import asyncio
+    import sys
+    from pathlib import Path
     from rich.console import Console
     from rich.panel import Panel
     from openlama.logo import print_logo
-    from openlama.daemon import get_daemon_status
-    from openlama.config import get_config
+    from openlama.daemon import get_daemon_status, _read_pid, _find_running_process, _is_launchd_managed, _is_systemd_managed
+    from openlama.config import get_config, TERMUX
 
     console = Console()
     print_logo(console, compact=True)
 
-    # Process status
+    # Process status with execution mode
     pid_info = get_daemon_status()
+
+    # Detect execution mode
+    run_mode = ""
+    if _is_launchd_managed():
+        run_mode = "launchd service"
+    elif sys.platform == "linux" and not TERMUX:
+        if _is_systemd_managed():
+            run_mode = "systemd service"
+    elif TERMUX:
+        boot_script = Path.home() / ".termux" / "boot" / "start-openlama.sh"
+        if boot_script.exists():
+            run_mode = "Termux:Boot"
+
+    if not run_mode:
+        pid = _read_pid()
+        if pid:
+            run_mode = "daemon (-d)"
+        elif _find_running_process():
+            run_mode = "foreground (start)"
 
     # Ollama status
     async def check_ollama():
@@ -247,6 +268,8 @@ def status():
 
     lines = []
     lines.append(f"  Process:  {pid_info}")
+    if run_mode:
+        lines.append(f"    Mode:   {run_mode}")
     lines.append(f"")
     ver_str = f" v{ver_info.get('current', '?')}" if ver_info else ""
     lines.append(f"  Ollama:   {'Connected' + ver_str if alive else 'Not reachable'}")
@@ -254,7 +277,12 @@ def status():
     if alive:
         lines.append(f"    Default: {default_model or '(none)'}")
         if models:
-            lines.append(f"    Models:  {', '.join(models)}")
+            MAX_DISPLAY = 5
+            if len(models) <= MAX_DISPLAY:
+                lines.append(f"    Models:  {', '.join(models)}")
+            else:
+                shown = ', '.join(models[:MAX_DISPLAY])
+                lines.append(f"    Models:  {shown} ... (+{len(models) - MAX_DISPLAY} more, {len(models)} total)")
         else:
             lines.append(f"    Models:  (none)")
         if ver_info.get("update_available"):
