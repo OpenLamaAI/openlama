@@ -13,7 +13,7 @@ import tempfile
 import uuid
 from pathlib import Path
 
-from openlama.config import DATA_DIR
+from openlama.config import DATA_DIR, get_config_bool
 from openlama.tools.registry import register_tool
 
 SESSION_NAME = "openlama-code-agent"
@@ -343,8 +343,10 @@ async def _execute(args: dict) -> str:
         return err
 
     # ── Confirmation gate for execution actions ──
+    # Disable with: openlama config set code_agent_confirm false
     if action in ("run", "parallel", "run_background"):
-        if not args.get("confirmed", False):
+        require_confirm = get_config_bool("code_agent_confirm", default=True)
+        if require_confirm and not args.get("confirmed", False):
             return (
                 "Confirmation required before execution.\n"
                 "Present the following plan to the user and get approval:\n"

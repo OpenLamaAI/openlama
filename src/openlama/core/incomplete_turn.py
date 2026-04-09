@@ -19,7 +19,7 @@ logger = get_logger("incomplete_turn")
 # ── Korean verb stems for tool-related actions ──
 
 _KO_ACTION_STEMS = (
-    "검색|확인|조회|계산|분석|실행|처리|측정|점검|수행"
+    "검색|확인|조회|계산|분석|실행|처리|측정|점검|수행|작업"
 )
 
 _KO_COMPOUND_STEMS = (
@@ -41,12 +41,17 @@ _PLANNING_RE = re.compile(
     # Korean: wait/hold phrases (implies about to do something)
     r"|잠시만요|잠깐만요|잠시만 기다|잠깐만 기다|기다려주세요|기다려 주세요"
     # English planning phrases
-    r"|i(?:'ll| will) (?:search|check|look|find|calculate|run|fetch|read|write|get)"
-    r"|let me (?:search|check|look|find|calculate|run|fetch|read|write|get)"
+    r"|i(?:'ll| will) (?:search|check|look|find|calculate|run|fetch|read|write|get|execute|analyze|use)"
+    r"|let me (?:search|check|look|find|calculate|run|fetch|read|write|get|execute|analyze|use)"
     r"|i(?:'m| am) going to"
     r"|i can do that"
     r"|i'll do that"
     r"|let me do that"
+    # code_agent specific: model describes using code_agent without calling it
+    r"|code.?agent.*(?:사용하여|이용하여|통해|실행하|사용해서|이용해서)"
+    r"|(?:사용하여|이용하여|통해).*code.?agent"
+    r"|using code.?agent"
+    r"|(?:will|going to) (?:use|run|execute) (?:the )?code.?agent"
     r")",
     re.IGNORECASE,
 )
@@ -71,6 +76,10 @@ _FABRICATION_RE = re.compile(
     r"|according to (?:my |the )(?:search|check|calculation|analysis)"
     r"|the (?:search|query|lookup) (?:returned|shows|found)"
     r"|after (?:searching|checking|looking|reading|running)"
+    # code_agent specific: claims to have run code_agent
+    r"|code.?agent.*(?:실행했|수행했|작업했|완료했|사용했)"
+    r"|(?:실행했|수행했|작업했|완료했|사용했).*code.?agent"
+    r"|(?:ran|executed|used) (?:the )?code.?agent"
     r")",
     re.IGNORECASE,
 )
