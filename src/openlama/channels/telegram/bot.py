@@ -93,14 +93,23 @@ async def _start_scheduler(app):
         from openlama.core.scheduler import start_scheduler, set_channel_sender
 
         async def _telegram_sender(chat_id: int, text: str):
-            """Send cron job results to Telegram chat."""
+            """Send cron job results to Telegram chat with markdown formatting."""
             try:
-                # Truncate if too long
-                if len(text) > 4000:
-                    text = text[:4000] + "\n\n... (truncated)"
-                await app.bot.send_message(chat_id=chat_id, text=text)
-            except Exception as e:
-                logger.error("failed to send cron result to chat %d: %s", chat_id, e)
+                from openlama.utils.formatting import convert_markdown, split_message
+                plain, entities = convert_markdown(text)
+                parts = split_message(plain, entities)
+                for chunk_text, chunk_ents in parts:
+                    await app.bot.send_message(
+                        chat_id=chat_id, text=chunk_text, entities=chunk_ents,
+                    )
+            except Exception:
+                # Fallback: send as plain text
+                try:
+                    if len(text) > 4000:
+                        text = text[:4000] + "\n\n... (truncated)"
+                    await app.bot.send_message(chat_id=chat_id, text=text)
+                except Exception as e:
+                    logger.error("failed to send cron result to chat %d: %s", chat_id, e)
 
         set_channel_sender(_telegram_sender)
         start_scheduler()
