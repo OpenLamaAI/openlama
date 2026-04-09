@@ -18,17 +18,42 @@ logger = get_logger(__name__)
 # ── In-memory caches ─────────────────────────────────────
 
 PULL_STATE: dict[int, dict] = {}
-MODEL_VISION_CACHE: dict[str, dict] = {}
-MODEL_CAPS_CACHE: dict[str, dict] = {}  # {model: {"caps": [...], "ts": int}}
+MODEL_CAPS_CACHE: dict[str, dict] = {}
+
+# ── Shared httpx client ──────────────────────────────────
+
+_shared_client: httpx.AsyncClient | None = None
+
+
+def _get_client(timeout: float | httpx.Timeout = 30) -> httpx.AsyncClient:
+    """Get or create a shared httpx client. Use as context manager for streaming."""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(timeout=timeout)
+    return _shared_client
+
+
+async def _api_get(path: str, timeout: float = 10) -> httpx.Response:
+    """GET request to Ollama API."""
+    base = get_config("ollama_base")
+    async with httpx.AsyncClient(timeout=timeout) as c:
+        return await c.get(f"{base}{path}")
+
+
+async def _api_post(path: str, json: dict, timeout: float | None = None) -> httpx.Response:
+    """POST request to Ollama API."""
+    base = get_config("ollama_base")
+    t = timeout or get_config_int("ollama_timeout_sec", 120)
+    async with httpx.AsyncClient(timeout=t) as c:
+        return await c.post(f"{base}{path}", json=json)
 
 
 # ── Health check ─────────────────────────────────────────
 
 async def ollama_alive() -> bool:
     try:
-        async with httpx.AsyncClient(timeout=3) as client:
-            r = await client.get(f"{get_config('ollama_base')}/api/tags")
-            return r.status_code == 200
+        r = await _api_get("/api/tags", timeout=3)
+        return r.status_code == 200
     except Exception:
         return False
 
@@ -42,10 +67,9 @@ async def ensure_ollama_running() -> tuple[bool, str]:
 async def get_ollama_version() -> str | None:
     """Get the running Ollama server version."""
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{get_config('ollama_base')}/api/version")
-            if r.status_code == 200:
-                return r.json().get("version")
+        r = await _api_get("/api/version", timeout=5)
+        if r.status_code == 200:
+            return r.json().get("version")
     except Exception:
         pass
     return None
@@ -94,33 +118,28 @@ async def check_ollama_update() -> dict:
 # ── Model listing ─────────────────────────────────────────
 
 async def fetch_models() -> list[str]:
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{get_config('ollama_base')}/api/tags")
-        r.raise_for_status()
-        data = r.json()
+    r = await _api_get("/api/tags")
+    r.raise_for_status()
+    data = r.json()
     models = [m.get("name", "") for m in data.get("models", []) if m.get("name")]
     models.sort()
     return models
 
 
-# Alias so callers can use either name
 list_models = fetch_models
 
 
 async def fetch_models_detailed() -> list[dict]:
-    async with httpx.AsyncClient(timeout=10) as client:
-        r = await client.get(f"{get_config('ollama_base')}/api/tags")
-        r.raise_for_status()
-        data = r.json()
-    return data.get("models", [])
+    r = await _api_get("/api/tags")
+    r.raise_for_status()
+    return r.json().get("models", [])
 
 
 async def get_running_models() -> list[dict]:
     try:
-        async with httpx.AsyncClient(timeout=5) as client:
-            r = await client.get(f"{get_config('ollama_base')}/api/ps")
-            r.raise_for_status()
-            return r.json().get("models", [])
+        r = await _api_get("/api/ps", timeout=5)
+        r.raise_for_status()
+        return r.json().get("models", [])
     except Exception:
         return []
 
@@ -137,10 +156,9 @@ async def get_model_capabilities(model: str) -> list[str]:
 
     caps: list[str] = []
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(f"{get_config('ollama_base')}/api/show", json={"name": model})
-            r.raise_for_status()
-            data = r.json()
+        r = await _api_post("/api/show", json={"name": model}, timeout=15)
+        r.raise_for_status()
+        data = r.json()
 
         raw_caps = data.get("capabilities")
         if isinstance(raw_caps, list):
@@ -189,16 +207,15 @@ async def _probe_model_image_support(model: str) -> tuple[bool, str]:
         "stream": False,
     }
     try:
-        async with httpx.AsyncClient(timeout=15) as client:
-            r = await client.post(f"{get_config('ollama_base')}/api/chat", json=payload)
-            if r.status_code >= 400:
-                msg = r.text.lower()
-                if any(k in msg for k in ("does not support", "not support", "vision", "image")):
-                    return False, "images not supported"
-                return False, f"probe failed: http {r.status_code}"
-            data = r.json()
-            content = ((data.get("message") or {}).get("content") or "").strip()
-            return (True, "probe success") if content else (False, "probe response empty")
+        r = await _api_post("/api/chat", json=payload, timeout=15)
+        if r.status_code >= 400:
+            msg = r.text.lower()
+            if any(k in msg for k in ("does not support", "not support", "vision", "image")):
+                return False, "images not supported"
+            return False, f"probe failed: http {r.status_code}"
+        data = r.json()
+        content = ((data.get("message") or {}).get("content") or "").strip()
+        return (True, "probe success") if content else (False, "probe response empty")
     except Exception as e:
         return False, f"probe exception: {e}"
 
@@ -280,10 +297,41 @@ def _build_options(settings: ModelSettings) -> dict:
         opts["repeat_penalty"] = settings.repeat_penalty
     if settings.seed != defaults["seed"]:
         opts["seed"] = settings.seed
-    # Always include num_ctx and num_predict for explicit control
     opts.setdefault("num_ctx", settings.num_ctx)
     opts.setdefault("num_predict", settings.num_predict)
     return opts
+
+
+def _build_chat_payload(
+    model: str,
+    messages: list[dict],
+    *,
+    stream: bool = False,
+    images: Optional[list[str]] = None,
+    settings: Optional[ModelSettings] = None,
+    tools: Optional[list[dict]] = None,
+    think: bool = False,
+) -> dict:
+    """Build Ollama chat API payload. Shared by all chat functions."""
+    payload_messages = [dict(m) for m in messages]
+    if images:
+        for i in range(len(payload_messages) - 1, -1, -1):
+            if payload_messages[i].get("role") == "user":
+                payload_messages[i]["images"] = images
+                break
+
+    payload: dict[str, Any] = {"model": model, "messages": payload_messages, "stream": stream}
+    if settings:
+        opts = _build_options(settings)
+        if opts:
+            payload["options"] = opts
+        if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
+            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
+    if tools:
+        payload["tools"] = tools
+    if think:
+        payload["think"] = True
+    return payload
 
 
 async def chat_with_ollama(
@@ -295,30 +343,10 @@ async def chat_with_ollama(
     think: bool = False,
 ) -> str:
     """Non-streaming chat. Returns response text."""
-    payload_messages = [dict(m) for m in messages]
-    if images:
-        for i in range(len(payload_messages) - 1, -1, -1):
-            if payload_messages[i].get("role") == "user":
-                payload_messages[i]["images"] = images
-                break
-
-    payload: dict[str, Any] = {"model": model, "messages": payload_messages, "stream": False}
-    if settings:
-        opts = _build_options(settings)
-        if opts:
-            payload["options"] = opts
-        if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
-    if tools:
-        payload["tools"] = tools
-    if think:
-        payload["think"] = True
-
-    timeout_sec = get_config_int("ollama_timeout_sec", 120)
-    async with httpx.AsyncClient(timeout=timeout_sec) as client:
-        r = await client.post(f"{get_config('ollama_base')}/api/chat", json=payload)
-        r.raise_for_status()
-        data = r.json()
+    payload = _build_chat_payload(model, messages, images=images, settings=settings, tools=tools, think=think)
+    r = await _api_post("/api/chat", json=payload)
+    r.raise_for_status()
+    data = r.json()
 
     msg = data.get("message") or {}
     return msg.get("content", "").strip()
@@ -335,27 +363,13 @@ async def chat_with_ollama_full(
 
     Returns: {"content": str, "tool_calls": list, "prompt_tokens": int, "completion_tokens": int}
     """
-    payload_messages = [dict(m) for m in messages]
-    payload: dict[str, Any] = {"model": model, "messages": payload_messages, "stream": False}
-    if settings:
-        opts = _build_options(settings)
-        if opts:
-            payload["options"] = opts
-        if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
-    if tools:
-        payload["tools"] = tools
-    if think:
-        payload["think"] = True
-
-    timeout_sec = get_config_int("ollama_timeout_sec", 120)
-    async with httpx.AsyncClient(timeout=timeout_sec) as client:
-        r = await client.post(f"{get_config('ollama_base')}/api/chat", json=payload)
-        if r.status_code != 200:
-            error_body = r.text[:500]
-            logger.error("Ollama API error %d: %s", r.status_code, error_body)
-            r.raise_for_status()
-        data = r.json()
+    payload = _build_chat_payload(model, messages, settings=settings, tools=tools, think=think)
+    r = await _api_post("/api/chat", json=payload)
+    if r.status_code != 200:
+        error_body = r.text[:500]
+        logger.error("Ollama API error %d: %s", r.status_code, error_body)
+        r.raise_for_status()
+    data = r.json()
 
     msg = data.get("message") or {}
     return {
@@ -375,24 +389,7 @@ async def chat_stream(
     think: bool = False,
 ) -> AsyncGenerator[dict, None]:
     """Streaming chat. Yields parsed JSON chunks."""
-    payload_messages = [dict(m) for m in messages]
-    if images:
-        for i in range(len(payload_messages) - 1, -1, -1):
-            if payload_messages[i].get("role") == "user":
-                payload_messages[i]["images"] = images
-                break
-
-    payload: dict[str, Any] = {"model": model, "messages": payload_messages, "stream": True}
-    if settings:
-        opts = _build_options(settings)
-        if opts:
-            payload["options"] = opts
-        if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
-            payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
-    if tools:
-        payload["tools"] = tools
-    if think:
-        payload["think"] = True
+    payload = _build_chat_payload(model, messages, stream=True, images=images, settings=settings, tools=tools, think=think)
 
     timeout = httpx.Timeout(connect=10, read=None, write=30, pool=30)
     async with httpx.AsyncClient(timeout=timeout) as client:
@@ -410,33 +407,28 @@ async def chat_stream(
 # ── Model management ──────────────────────────────────────
 
 async def get_model_info(model: str) -> dict:
-    async with httpx.AsyncClient(timeout=15) as client:
-        r = await client.post(f"{get_config('ollama_base')}/api/show", json={"name": model})
-        r.raise_for_status()
-        return r.json()
+    r = await _api_post("/api/show", json={"name": model}, timeout=15)
+    r.raise_for_status()
+    return r.json()
 
 
 async def copy_model(source: str, dest: str):
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.post(f"{get_config('ollama_base')}/api/copy", json={"source": source, "destination": dest})
-        r.raise_for_status()
+    r = await _api_post("/api/copy", json={"source": source, "destination": dest}, timeout=30)
+    r.raise_for_status()
 
 
 async def delete_model(model: str):
-    async with httpx.AsyncClient(timeout=30) as client:
-        r = await client.request("DELETE", f"{get_config('ollama_base')}/api/delete", json={"name": model})
+    base = get_config("ollama_base")
+    async with httpx.AsyncClient(timeout=30) as c:
+        r = await c.request("DELETE", f"{base}/api/delete", json={"name": model})
         if r.status_code == 405:
-            r = await client.post(f"{get_config('ollama_base')}/api/delete", json={"name": model})
+            r = await c.post(f"{base}/api/delete", json={"name": model})
         r.raise_for_status()
 
 
 async def unload_model(model: str):
     try:
-        async with httpx.AsyncClient(timeout=10) as client:
-            await client.post(
-                f"{get_config('ollama_base')}/api/generate",
-                json={"model": model, "keep_alive": 0},
-            )
+        await _api_post("/api/generate", json={"model": model, "keep_alive": 0}, timeout=10)
     except Exception:
         pass
 
@@ -519,9 +511,7 @@ async def summarize_context(model: str, conversation_text: str) -> str:
         "stream": False,
         "options": {"num_predict": 512, "temperature": 0.3},
     }
-    timeout_sec = get_config_int("ollama_timeout_sec", 120)
-    async with httpx.AsyncClient(timeout=timeout_sec) as client:
-        r = await client.post(f"{get_config('ollama_base')}/api/chat", json=payload)
-        r.raise_for_status()
-        data = r.json()
+    r = await _api_post("/api/chat", json=payload)
+    r.raise_for_status()
+    data = r.json()
     return (data.get("message") or {}).get("content", "").strip()
