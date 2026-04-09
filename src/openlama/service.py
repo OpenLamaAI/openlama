@@ -84,6 +84,12 @@ def _install_launchd():
     # Build ProgramArguments XML entries (each arg as separate <string>)
     args_xml = "\n".join(f"        <string>{a}</string>" for a in args_list + ["start"])
 
+    # Build PATH: include Homebrew paths so launchd can find ollama, git, etc.
+    brew_paths = ["/opt/homebrew/bin", "/opt/homebrew/sbin", "/usr/local/bin"]
+    sys_paths = ["/usr/bin", "/bin", "/usr/sbin", "/sbin"]
+    launchd_path = ":".join(p for p in brew_paths + sys_paths if Path(p).is_dir())
+    home = str(Path.home())
+
     content = f"""<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
@@ -94,6 +100,13 @@ def _install_launchd():
     <array>
 {args_xml}
     </array>
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PATH</key>
+        <string>{launchd_path}</string>
+        <key>HOME</key>
+        <string>{home}</string>
+    </dict>
     <key>RunAtLoad</key>
     <true/>
     <key>KeepAlive</key>

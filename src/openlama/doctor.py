@@ -502,6 +502,110 @@ def check_admin_password() -> CheckResult:
         return CheckResult("Admin password", "warn", "Could not check (DB not initialized)")
 
 
+def check_full_disk_access() -> CheckResult:
+    """Check if Full Disk Access is granted (macOS only)."""
+    if sys.platform != "darwin":
+        return CheckResult("Full Disk Access", "ok", "Not macOS — skipped")
+
+    test_dir = Path.home() / "Desktop"
+    if not test_dir.exists():
+        return CheckResult("Full Disk Access", "ok", "~/Desktop not found — skipped")
+
+    if os.access(test_dir, os.R_OK):
+        return CheckResult("Full Disk Access", "ok", "Granted")
+
+    return CheckResult(
+        "Full Disk Access", "warn",
+        "Not granted. Tools accessing ~/Desktop, ~/Documents, ~/Downloads will fail. "
+        "Grant FDA: System Settings > Privacy & Security > Full Disk Access > add your terminal app.",
+        fixable=True, fix_action="Open System Settings to grant Full Disk Access",
+    )
+
+
+def fix_full_disk_access():
+    """Open macOS System Settings to the Full Disk Access pane."""
+    import subprocess
+    subprocess.run(
+        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"],
+        check=False,
+    )
+
+
+def check_homebrew_path() -> CheckResult:
+    """Check if Homebrew bin directory is in PATH."""
+    if sys.platform != "darwin":
+        return CheckResult("Homebrew PATH", "ok", "Not macOS — skipped")
+
+    brew_paths = ["/opt/homebrew/bin", "/usr/local/bin"]
+    path_dirs = os.environ.get("PATH", "").split(":")
+
+    for bp in brew_paths:
+        if bp in path_dirs and Path(bp).is_dir():
+            return CheckResult("Homebrew PATH", "ok", f"{bp} in PATH")
+
+    # Check if homebrew exists but not in PATH
+    for bp in brew_paths:
+        if Path(bp).is_dir():
+            return CheckResult(
+                "Homebrew PATH", "warn",
+                f"{bp} exists but not in PATH. "
+                "Tools may fail to find ollama, git, tmux, etc. "
+                "Add to your shell profile: export PATH=\"{bp}:$PATH\"",
+            )
+
+    return CheckResult("Homebrew PATH", "ok", "Homebrew not installed — skipped")
+
+
+def check_optional_binaries() -> CheckResult:
+    """Check availability of optional tool binaries."""
+    bins = {"git": "git", "tmux": "tmux", "node": "node"}
+    found = []
+    missing = []
+    for name, cmd in bins.items():
+        if shutil.which(cmd):
+            found.append(name)
+        else:
+            missing.append(name)
+
+    if not missing:
+        return CheckResult("Optional binaries", "ok", ", ".join(found))
+
+    return CheckResult(
+        "Optional binaries", "warn",
+        f"Missing: {', '.join(missing)}. Some tools will be unavailable. "
+        f"Install via: brew install {' '.join(missing)}",
+    )
+
+
+def check_launchd_env() -> CheckResult:
+    """Check if the launchd plist has EnvironmentVariables set."""
+    if sys.platform != "darwin":
+        return CheckResult("Launchd env", "ok", "Not macOS — skipped")
+
+    plist = Path.home() / "Library" / "LaunchAgents" / "com.openlama.agent.plist"
+    if not plist.exists():
+        return CheckResult("Launchd env", "ok", "No launchd service registered — skipped")
+
+    content = plist.read_text()
+    if "EnvironmentVariables" in content:
+        return CheckResult("Launchd env", "ok", "EnvironmentVariables set in plist")
+
+    return CheckResult(
+        "Launchd env", "warn",
+        "Plist has no EnvironmentVariables. "
+        "The service may fail to find Homebrew binaries (ollama, git, etc). "
+        "Re-register with: openlama start --uninstall-service && openlama start --install-service",
+        fixable=True, fix_action="Reinstall launchd service with PATH included",
+    )
+
+
+def fix_launchd_env():
+    """Reinstall launchd service to include EnvironmentVariables."""
+    from openlama.service import uninstall, install
+    uninstall()
+    install()
+
+
 def check_allowlist() -> CheckResult:
     """Check allow list status."""
     try:
@@ -531,6 +635,10 @@ async def run_checks() -> DoctorReport:
         check_python_deps,
         check_daemon,
         check_service_registered,
+        check_full_disk_access,
+        check_homebrew_path,
+        check_optional_binaries,
+        check_launchd_env,
         check_disk_space,
         check_prompts_dir,
         check_skills,
@@ -568,6 +676,8 @@ async def run_fixes(report: DoctorReport) -> list[str]:
         "Ollama server": fix_ollama,
         "Ollama version": fix_ollama_version,
         "Boot service": fix_service,
+        "Full Disk Access": fix_full_disk_access,
+        "Launchd env": fix_launchd_env,
         "ComfyUI workflows": fix_comfyui_workflows,
         "Prompts directory": fix_prompts_dir,
         "Daemon process": fix_daemon,
