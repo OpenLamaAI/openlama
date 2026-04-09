@@ -1,5 +1,6 @@
 <p align="center">
-  <h1 align="center">openlama</h1>
+  <img src="images/06_text_logo_clear.png" alt="OpenLama" width="400">
+  <br>
   <p align="center">
     A fully local AI agent bot powered by <a href="https://ollama.com">Ollama</a>.<br>
     Chat via Telegram or terminal — tool calling, image generation, scheduled tasks, custom skills.<br>

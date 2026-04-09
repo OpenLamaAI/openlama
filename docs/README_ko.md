@@ -1,5 +1,6 @@
 <p align="center">
-  <h1 align="center">openlama</h1>
+  <img src="../images/06_text_logo_clear.png" alt="OpenLama" width="400">
+  <br>
   <p align="center">
     <a href="https://ollama.com">Ollama</a> 기반의 완전 로컬 AI 에이전트 봇.<br>
     텔레그램 또는 터미널에서 도구 호출, 이미지 생성, 예약 작업, 커스텀 스킬을 사용하세요.<br>
