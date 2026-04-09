@@ -62,11 +62,14 @@ _render_console = Console(file=StringIO(), force_terminal=True, color_system="tr
 _spinner_frames = itertools.cycle("⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏")
 _status = {"text": ""}
 
+# Cancellation: tracks the active processing task so ESC can cancel it
+_current_task: asyncio.Task | None = None
+
 
 def _toolbar():
     """Bottom toolbar — shows spinner when worker is processing."""
     if _status["text"]:
-        return HTML(f" {next(_spinner_frames)} <b>{_status['text']}</b>")
+        return HTML(f" {next(_spinner_frames)} <b>{_status['text']}</b>  <ansigray>[ESC to cancel]</ansigray>")
     return HTML(" <ansigray>Type / for commands, /quit to exit</ansigray>")
 
 
@@ -1344,7 +1347,12 @@ async def _input_loop(queue: asyncio.Queue, session: PromptSession):
 
 
 async def _worker_loop(queue: asyncio.Queue, uid: int):
-    """Worker loop — pulls messages from queue and processes sequentially."""
+    """Worker loop — pulls messages from queue and processes sequentially.
+
+    Each message is processed in a cancellable asyncio.Task so that
+    pressing ESC can abort the in-flight request (including Ollama HTTP calls).
+    """
+    global _current_task
     while True:
         msg = await queue.get()
 
@@ -1359,7 +1367,17 @@ async def _worker_loop(queue: asyncio.Queue, uid: int):
 
         # Visual separator before output
         await aprint(Rule(style="dim"))
-        await _process_input(uid, msg)
+
+        # Run in a cancellable task so ESC can abort it
+        _current_task = asyncio.create_task(_process_input(uid, msg))
+        try:
+            await _current_task
+        except asyncio.CancelledError:
+            _status["text"] = ""
+            await aprint("  [yellow]⚠ Cancelled.[/yellow]")
+        finally:
+            _current_task = None
+
         await aprint(Rule(style="dim"))
 
         queue.task_done()
@@ -1428,7 +1446,7 @@ async def run_chat():
                 console.print(f"  [blue]AI:[/blue]  [dim]{short_a}[/dim]")
         console.print()
 
-    # Key bindings — fix Korean IME truncation on Enter
+    # Key bindings — fix Korean IME truncation on Enter + ESC cancellation
     kb = KeyBindings()
 
     @kb.add("enter")
@@ -1437,6 +1455,20 @@ async def run_chat():
         buf = event.current_buffer
         buf.insert_text(" ")
         buf.validate_and_handle()
+
+    @kb.add("escape", eager=True)
+    def _handle_escape(event):
+        """Cancel the active processing task when ESC is pressed.
+
+        Only fires if there's an active task (status bar shows processing).
+        If the user is typing (no active task), clears the input buffer instead.
+        """
+        global _current_task
+        if _current_task and not _current_task.done():
+            _current_task.cancel()
+        else:
+            # No active task — clear input buffer (standard ESC behavior)
+            event.current_buffer.reset()
 
     # Setup prompt session with bottom toolbar for spinner
     history_path = str(DATA_DIR / "chat_history")
