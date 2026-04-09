@@ -129,6 +129,8 @@ def main(ctx):
 @main.command()
 def setup():
     """Run the interactive setup wizard (Ollama, models, Telegram, password)."""
+    from openlama.logo import print_logo
+    print_logo()
     from openlama.onboarding import run_setup
     run_setup()
 
@@ -157,6 +159,9 @@ def start(daemon, with_cli, install_service, uninstall_service):
         click.echo("  Run 'openlama setup' first to complete initial setup.")
         click.echo()
         raise SystemExit(1)
+
+    from openlama.logo import print_logo
+    print_logo()
 
     if daemon:
         from openlama.daemon import start_daemon
@@ -217,10 +222,12 @@ def status():
     import asyncio
     from rich.console import Console
     from rich.panel import Panel
+    from openlama.logo import print_logo
     from openlama.daemon import get_daemon_status
     from openlama.config import get_config
 
     console = Console()
+    print_logo(console, compact=True)
 
     # Process status
     pid_info = get_daemon_status()
@@ -650,7 +657,9 @@ def doctor(action):
 
     console = Console()
 
-    console.print("\n[bold]openlama doctor[/bold] — running diagnostics...\n")
+    from openlama.logo import print_logo
+    print_logo(console, compact=True)
+    console.print("[bold]openlama doctor[/bold] — running diagnostics...\n")
 
     report = asyncio.run(run_checks())
 

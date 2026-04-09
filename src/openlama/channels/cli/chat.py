@@ -1377,10 +1377,10 @@ async def run_chat():
         await _run_profile_setup(uid)
 
     # Header
-    status = _get_status_line(uid)
+    from openlama.logo import print_logo
+    print_logo(console)
 
-    console.print()
-    console.print(Rule("[bold]openlama[/bold]", style="blue"))
+    status = _get_status_line(uid)
     console.print(f"  [dim]{status}[/dim]")
     console.print(f"  [dim]Type / for commands (Tab to autocomplete), /quit to exit.[/dim]")
     console.print()
