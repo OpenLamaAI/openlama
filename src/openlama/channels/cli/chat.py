@@ -774,6 +774,24 @@ async def _cmd_skills(uid: int, args: str):
     await aprint()
 
 
+async def _cmd_tools(uid: int, args: str):
+    from openlama.tools.registry import get_all_tools
+    tools = get_all_tools()
+    if not tools:
+        await aprint("  [dim]No tools registered.[/dim]\n")
+        return
+
+    table = Table(title="Registered Tools", show_lines=False, padding=(0, 2))
+    table.add_column("Name", style="cyan")
+    table.add_column("Description")
+    table.add_column("Admin", style="yellow", justify="center")
+    for t in sorted(tools, key=lambda x: x.name):
+        desc = t.description[:60] + ("…" if len(t.description) > 60 else "")
+        table.add_row(t.name, desc, "🔒" if t.admin_only else "")
+    await aprint(table)
+    await aprint()
+
+
 async def _cmd_mcp(uid: int, args: str):
     from openlama.core.mcp_client import list_server_configs, get_all_servers, get_all_mcp_tools
     configs = list_server_configs()
@@ -1173,6 +1191,7 @@ CMD_HANDLERS = {
     "export": _cmd_export,
     "ollama": _cmd_ollama,
     "skills": _cmd_skills,
+    "tools": _cmd_tools,
     "mcp": _cmd_mcp,
     "cron": _cmd_cron,
     "profile": _cmd_profile,

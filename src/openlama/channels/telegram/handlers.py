@@ -136,10 +136,13 @@ def main_menu_keyboard(is_logged_in: bool = False) -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("📋 Skills", callback_data="cmd:skills"),
-            InlineKeyboardButton("🔌 MCP", callback_data="cmd:mcp"),
+            InlineKeyboardButton("🔧 Tools", callback_data="cmd:tools"),
         ],
         [
+            InlineKeyboardButton("🔌 MCP", callback_data="cmd:mcp"),
             InlineKeyboardButton("📅 Cron Tasks", callback_data="cmd:cron"),
+        ],
+        [
             InlineKeyboardButton("📤 Export Chat", callback_data="cmd:export"),
         ],
         [
@@ -253,16 +256,8 @@ HELP_TEXT = """<b>📖 Openlama User Guide</b>
 • Video → Frame extraction analysis
 • ZIP → Skill installation or content analysis
 
-<b>🔧 Available Tools</b> (tool-supported models)
-• 🔍 Web search  • 🌐 URL fetch  • 🕐 Date/time
-• 💻 Code execution (Python/Node/Shell)
-• 📁 File read/write  • 🖥 Shell commands
-• 🔀 Git  • 📊 Process manager  • 🖥 tmux
-• 🧮 Calculator  • 🎨 Image gen/edit (ComfyUI)
-• 🧠 Memory (long-term + daily episodic search)
-• 📋 Cron scheduler  • 🛠 Skill creator
-• 🎤 Whisper STT  • 🔄 Self-update
-• 📝 Obsidian notes  • 📡 MCP tools
+<b>🔧 Tools</b>
+• /tools — List all registered tools
 """
 
 
@@ -1299,6 +1294,30 @@ async def skills_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await update.message.reply_text("\n".join(lines), parse_mode="HTML")
 
 
+def _build_tools_text() -> str:
+    """Build the registered tools list text for /tools and callback."""
+    from openlama.tools.registry import get_all_tools
+    tools = get_all_tools()
+    if not tools:
+        return "🔧 <b>Tools</b>\n\nNo tools registered."
+    lines = [f"🔧 <b>Registered Tools</b> ({len(tools)})\n"]
+    for t in sorted(tools, key=lambda x: x.name):
+        admin_badge = " 🔒" if t.admin_only else ""
+        desc = t.description[:60]
+        if len(t.description) > 60:
+            desc += "…"
+        lines.append(f"• <b>{t.name}</b>{admin_badge} — {desc}")
+    lines.append(f"\n🔒 = admin only")
+    return "\n".join(lines)
+
+
+async def tools_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    user = await require_auth(update)
+    if not user:
+        return
+    await update.message.reply_text(_build_tools_text(), parse_mode="HTML")
+
+
 async def mcp_cmd(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user = await require_auth(update)
     if not user:
@@ -2175,6 +2194,14 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]))
         return
 
+    # ── Tools ──
+    if data == "cmd:tools":
+        text = _build_tools_text()
+        await q.edit_message_text(text, parse_mode="HTML", reply_markup=InlineKeyboardMarkup([
+            [InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu")],
+        ]))
+        return
+
     # ── MCP ──
     if data == "cmd:mcp":
         try:
@@ -2331,6 +2358,7 @@ def register_all_handlers(app: Application):
     app.add_handler(CommandHandler("compress", compress_cmd))
     app.add_handler(CommandHandler("session", session_cmd))
     app.add_handler(CommandHandler("skills", skills_cmd))
+    app.add_handler(CommandHandler("tools", tools_cmd))
     app.add_handler(CommandHandler("mcp", mcp_cmd))
     app.add_handler(CommandHandler("cron", cron_cmd))
     app.add_handler(CommandHandler("profile", profile_cmd))

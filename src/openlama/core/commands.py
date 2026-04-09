@@ -40,6 +40,7 @@ COMMANDS: list[dict] = [
     # System
     {"name": "ollama", "description": "Ollama server management", "category": "system"},
     {"name": "skills", "description": "List installed skills", "category": "system"},
+    {"name": "tools", "description": "List registered tools", "category": "system"},
     {"name": "mcp", "description": "MCP server status", "category": "system"},
     {"name": "cron", "description": "View and manage scheduled tasks", "category": "system"},
 
