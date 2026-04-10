@@ -30,7 +30,7 @@ Optimized for [Gemma 4](https://blog.google/innovation-and-ai/technology/develop
 
 - **100% Local** — No cloud APIs. All processing on your hardware.
 - **Dual Channel** — Telegram bot + terminal TUI with shared conversation context.
-- **20+ Built-in Tools** — Web search, code execution, file I/O, image generation, Git, Obsidian, and more.
+- **22+ Built-in Tools** — Web search, code execution, file I/O, image generation, Git, Claude Code agent, Obsidian, and more.
 - **Custom Skills** — Create reusable instruction sets triggered by keywords.
 - **MCP Support** — Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io).
 - **Scheduled Tasks** — Cron-based recurring tasks executed by AI.
@@ -193,6 +193,7 @@ Type `/` to see all available commands:
     /skills           List installed skills
     /mcp              MCP server status
     /cron             View and manage scheduled tasks
+    /tools            List all registered tools
 ```
 
 ---
@@ -216,7 +217,7 @@ After `openlama start`, open your bot in Telegram:
 
 ---
 
-## Built-in Tools (20+)
+## Built-in Tools (22+)
 
 | Tool | Description |
 |------|-------------|
@@ -240,15 +241,16 @@ After `openlama start`, open your bot in Telegram:
 | `self_update` | Check and install openlama updates |
 | `whisper` | Audio/voice transcription (STT, optional) |
 | `obsidian` | Obsidian vault read/write/search (optional) |
+| `code_agent` | Claude Code CLI agent for complex coding tasks |
 | `termux_device` | Android device control via Termux:API (Android only) |
 
 The AI understands tool requests in any language:
 
-> "서버 상태 확인해줘" → `shell_command`
+> "check server status" → `shell_command`
 > "search for latest AI news" → `web_search`
-> "매일 10시에 뉴스 요약해줘" → `cron_manager`
-> "노트 목록 보여줘" → `obsidian`
-> "배터리 확인해줘" → `termux_device` (Android)
+> "summarize tech news every day at 9am" → `cron_manager`
+> "list my notes" → `obsidian`
+> "check battery level" → `termux_device` (Android)
 
 ---
 
@@ -630,7 +632,7 @@ Contributions are welcome! Please:
 ### Development Setup
 
 ```bash
-git clone https://github.com/sussa3007/openlama.git
+git clone https://github.com/OpenLamaAI/openlama.git
 cd openlama
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"

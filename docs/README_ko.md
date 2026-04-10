@@ -30,7 +30,7 @@
 
 - **100% 로컬** — 클라우드 API 없음. 모든 처리가 내 하드웨어에서 실행.
 - **듀얼 채널** — 텔레그램 봇 + 터미널 TUI. 대화 컨텍스트 공유.
-- **20개 이상 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git, Obsidian 등.
+- **22개 이상 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git, Claude Code 에이전트, Obsidian 등.
 - **커스텀 스킬** — 키워드에 자동 트리거되는 재사용 가능한 지침 세트.
 - **MCP 지원** — [Model Context Protocol](https://modelcontextprotocol.io)로 외부 도구 서버 연결.
 - **예약 작업** — 크론 기반 반복 작업을 AI가 실행.
@@ -190,6 +190,7 @@ You: 서울 날씨 알려줘
     /skills           스킬 목록
     /mcp              MCP 서버 상태
     /cron             예약 작업 관리
+    /tools            등록된 도구 목록
 ```
 
 ---
@@ -213,7 +214,7 @@ You: 서울 날씨 알려줘
 
 ---
 
-## 내장 도구 (20+개)
+## 내장 도구 (22+개)
 
 | 도구 | 설명 |
 |------|------|
@@ -237,6 +238,7 @@ You: 서울 날씨 알려줘
 | `self_update` | openlama 업데이트 확인/설치 |
 | `whisper` | 오디오/음성 텍스트 변환 (STT, 선택) |
 | `obsidian` | 옵시디언 노트 읽기/쓰기/검색 (선택) |
+| `code_agent` | Claude Code CLI 에이전트 — 복잡한 코딩 작업 수행 |
 | `termux_device` | Android 디바이스 제어 — Termux:API (Android 전용) |
 
 AI는 어떤 언어로 요청해도 도구를 사용합니다:
@@ -616,7 +618,7 @@ export OPENLAMA_DATA_DIR=/custom/path
 ### 개발 환경 설정
 
 ```bash
-git clone https://github.com/sussa3007/openlama.git
+git clone https://github.com/OpenLamaAI/openlama.git
 cd openlama
 uv venv && source .venv/bin/activate
 uv pip install -e ".[dev]"
