@@ -1,22 +1,49 @@
 """Tool: process_manager – process and system management (admin only)."""
 
 import asyncio
+import re
+import shlex
 import sys
 
 from openlama.config import get_config_int
 from openlama.tools.registry import register_tool
 
+# Allowed actions — prevents arbitrary command fallback
+_KNOWN_ACTIONS = {"ps", "kill", "top", "df", "free", "uptime", "netstat", "lsof", "systemctl", "sysinfo"}
 
-async def _run_cmd(cmd: str, timeout: int = None) -> str:
-    """Run a shell command and return output."""
+# Allowed signals for kill
+_ALLOWED_SIGNALS = {"TERM", "KILL", "HUP", "INT", "QUIT", "USR1", "USR2", "STOP", "CONT"}
+
+# Safe argument pattern: alphanumeric, dash, dot, colon, slash, underscore
+_SAFE_ARG_RE = re.compile(r'^[a-zA-Z0-9._:/@\-]+$')
+
+
+def _sanitize_arg(arg: str) -> str | None:
+    """Return sanitized argument or None if it contains shell metacharacters."""
+    if not arg:
+        return None
+    if _SAFE_ARG_RE.match(arg):
+        return arg
+    return None
+
+
+async def _run_cmd(cmd: str | list[str], timeout: int = None) -> str:
+    """Run a command and return output. Prefers exec over shell when given a list."""
     if timeout is None:
         timeout = get_config_int("code_execution_timeout", 30)
     try:
-        proc = await asyncio.create_subprocess_shell(
-            cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
+        if isinstance(cmd, list):
+            proc = await asyncio.create_subprocess_exec(
+                *cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
+        else:
+            proc = await asyncio.create_subprocess_shell(
+                cmd,
+                stdout=asyncio.subprocess.PIPE,
+                stderr=asyncio.subprocess.PIPE,
+            )
         try:
             stdout, stderr = await asyncio.wait_for(
                 proc.communicate(), timeout=timeout
@@ -46,46 +73,52 @@ async def _execute(args: dict) -> str:
     target = args.get("target", "").strip()
 
     if not action:
-        return "Please specify an action (ps, kill, top, df, free, uptime, netstat, systemctl, lsof)"
+        return "Please specify an action (ps, kill, top, df, free, uptime, netstat, systemctl, lsof, sysinfo)"
+
+    if action not in _KNOWN_ACTIONS:
+        return f"Unknown action: {action}. Available: {', '.join(sorted(_KNOWN_ACTIONS))}"
 
     _win = sys.platform == "win32"
 
     if action == "ps":
         if _win:
-            return await _run_cmd("tasklist")
-        extra = target or "aux"
-        return await _run_cmd(f"ps {extra}")
+            return await _run_cmd(["tasklist"])
+        safe_target = _sanitize_arg(target)
+        extra = safe_target or "aux"
+        return await _run_cmd(["ps", extra])
 
     if action == "kill":
         if not target:
             return "Please specify a process PID or name to terminate."
+        signal = args.get("signal", "TERM").upper()
+        if signal not in _ALLOWED_SIGNALS:
+            return f"Invalid signal: {signal}. Allowed: {', '.join(sorted(_ALLOWED_SIGNALS))}"
+        safe_target = _sanitize_arg(target)
+        if not safe_target:
+            return f"Invalid target: contains disallowed characters."
         if _win:
-            if target.isdigit():
-                return await _run_cmd(f"taskkill /PID {target} /F")
-            return await _run_cmd(f'taskkill /IM "{target}" /F')
-        signal = args.get("signal", "TERM")
-        # If target is numeric, use kill directly
-        if target.isdigit():
-            return await _run_cmd(f"kill -{signal} {target}")
-        # Otherwise use pkill
-        return await _run_cmd(f"pkill -{signal} -f {target}")
+            if safe_target.isdigit():
+                return await _run_cmd(["taskkill", "/PID", safe_target, "/F"])
+            return await _run_cmd(["taskkill", "/IM", safe_target, "/F"])
+        if safe_target.isdigit():
+            return await _run_cmd(["kill", f"-{signal}", safe_target])
+        return await _run_cmd(["pkill", f"-{signal}", "-f", safe_target])
 
     if action == "top":
         if _win:
             return await _run_cmd("wmic cpu get loadpercentage")
         if sys.platform == "darwin":
-            return await _run_cmd("top -l 1 -n 15 -s 0")
+            return await _run_cmd(["top", "-l", "1", "-n", "15", "-s", "0"])
         return await _run_cmd("top -b -n 1 | head -30")
 
     if action == "df":
         if _win:
             return await _run_cmd("wmic logicaldisk get size,freespace,caption")
-        return await _run_cmd("df -h")
+        return await _run_cmd(["df", "-h"])
 
     if action == "free":
         if _win:
             return await _run_cmd("wmic os get freephysicalmemory,totalvisiblememorysize")
-        # macOS doesn't have free, use vm_stat
         return await _run_cmd(
             "free -h 2>/dev/null || "
             "(echo '=== Memory ===' && vm_stat && echo '' && "
@@ -95,24 +128,35 @@ async def _execute(args: dict) -> str:
     if action == "uptime":
         if _win:
             return await _run_cmd("wmic os get lastbootuptime")
-        return await _run_cmd("uptime")
+        return await _run_cmd(["uptime"])
 
     if action == "netstat":
         if _win:
-            return await _run_cmd(f"netstat {target}" if target else "netstat -ano")
+            if target:
+                safe_target = _sanitize_arg(target)
+                if not safe_target:
+                    return "Invalid target: contains disallowed characters."
+                return await _run_cmd(["netstat", safe_target])
+            return await _run_cmd(["netstat", "-ano"])
         if sys.platform == "darwin":
-            # macOS netstat doesn't support -tlnp
             return await _run_cmd("lsof -i -P -n | head -50")
-        extra = target or "-tlnp"
-        return await _run_cmd(f"netstat {extra} 2>/dev/null || lsof -i -P -n | head -50")
+        safe_target = _sanitize_arg(target)
+        extra = safe_target or "-tlnp"
+        return await _run_cmd(f"netstat {shlex.quote(extra)} 2>/dev/null || lsof -i -P -n | head -50")
 
     if action == "lsof":
         if _win:
             if target:
-                return await _run_cmd(f"netstat -ano | findstr :{target}")
-            return await _run_cmd("netstat -ano")
+                safe_target = _sanitize_arg(target)
+                if not safe_target:
+                    return "Invalid target: contains disallowed characters."
+                return await _run_cmd(f"netstat -ano | findstr :{shlex.quote(safe_target)}")
+            return await _run_cmd(["netstat", "-ano"])
         if target:
-            return await _run_cmd(f"lsof -i :{target} 2>/dev/null || lsof -p {target} 2>/dev/null")
+            safe_target = _sanitize_arg(target)
+            if not safe_target:
+                return "Invalid target: contains disallowed characters."
+            return await _run_cmd(f"lsof -i :{shlex.quote(safe_target)} 2>/dev/null || lsof -p {shlex.quote(safe_target)} 2>/dev/null")
         return await _run_cmd("lsof -i -P -n | head -50")
 
     if action == "systemctl":
@@ -120,7 +164,10 @@ async def _execute(args: dict) -> str:
             return "systemctl is not available on Windows. Use 'sc query' or Task Manager."
         if not target:
             return await _run_cmd("systemctl list-units --type=service --state=running 2>/dev/null || launchctl list | head -30")
-        return await _run_cmd(f"systemctl {target} 2>/dev/null || echo 'systemctl not available (macOS?)'")
+        safe_target = _sanitize_arg(target)
+        if not safe_target:
+            return "Invalid target: contains disallowed characters."
+        return await _run_cmd(f"systemctl {shlex.quote(safe_target)} 2>/dev/null || echo 'systemctl not available (macOS?)'")
 
     if action == "sysinfo":
         if _win:
@@ -140,11 +187,7 @@ async def _execute(args: dict) -> str:
             "(free -h 2>/dev/null || (vm_stat | head -5))"
         )
 
-    # Fallback: run as direct command
-    cmd = action
-    if target:
-        cmd += f" {target}"
-    return await _run_cmd(cmd)
+    return f"Unknown action: {action}. Available: {', '.join(sorted(_KNOWN_ACTIONS))}"
 
 
 register_tool(

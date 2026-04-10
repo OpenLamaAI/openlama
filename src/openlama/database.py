@@ -199,10 +199,19 @@ def get_user(uid: int) -> UserState:
     )
 
 
+_ALLOWED_USER_COLUMNS = {
+    "auth_until", "state", "selected_model", "login_fail_count",
+    "login_lock_until", "system_prompt", "think_mode",
+}
+
+
 def update_user(uid: int, **kwargs):
     if not kwargs:
         return
     keys = list(kwargs.keys())
+    for k in keys:
+        if k not in _ALLOWED_USER_COLUMNS:
+            raise ValueError(f"Disallowed column: {k}")
     vals = [kwargs[k] for k in keys]
     sets = ", ".join([f"{k}=?" for k in keys] + ["updated_at=strftime('%s','now')"])
     with db_conn() as conn:
@@ -288,7 +297,15 @@ def get_model_settings(uid: int, model: str = "") -> ModelSettings:
     )
 
 
+_ALLOWED_MODEL_SETTING_COLUMNS = {
+    "temperature", "top_p", "top_k", "num_ctx", "num_predict",
+    "repeat_penalty", "seed", "keep_alive",
+}
+
+
 def set_model_setting(uid: int, model: str, key: str, value: Any):
+    if key not in _ALLOWED_MODEL_SETTING_COLUMNS:
+        raise ValueError(f"Disallowed model setting: {key}")
     with db_conn() as conn:
         conn.execute(
             f"""INSERT INTO user_model_settings(user_id, model, {key}, updated_at)
@@ -388,9 +405,18 @@ def delete_cron_job(job_id: int) -> bool:
     return cur.rowcount > 0
 
 
+_ALLOWED_CRON_COLUMNS = {
+    "cron_expr", "task", "channel", "chat_id", "enabled",
+    "last_run", "next_run", "created_by",
+}
+
+
 def update_cron_job(job_id: int, **kwargs):
     if not kwargs:
         return
+    for k in kwargs:
+        if k not in _ALLOWED_CRON_COLUMNS:
+            raise ValueError(f"Disallowed column: {k}")
     sets = ", ".join(f"{k}=?" for k in kwargs)
     vals = list(kwargs.values()) + [job_id]
     with db_conn() as conn:

@@ -1,10 +1,47 @@
 """Tool: url_fetch – fetch and extract text from a URL."""
 
+import ipaddress
 import re
+from urllib.parse import urlparse
 
 import httpx
 
 from openlama.tools.registry import register_tool
+
+
+def _is_private_url(url: str) -> bool:
+    """Block requests to private/internal network addresses (SSRF protection)."""
+    try:
+        parsed = urlparse(url)
+        hostname = parsed.hostname
+        if not hostname:
+            return True
+        # Block common internal hostnames
+        if hostname in ("localhost", "metadata.google.internal"):
+            return True
+        # Check if hostname is a literal IP address
+        try:
+            ip = ipaddress.ip_address(hostname)
+            return ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved
+        except ValueError:
+            pass  # Not a literal IP, it's a domain name
+        # Resolve domain and check IPs
+        import socket
+        try:
+            for info in socket.getaddrinfo(hostname, None):
+                addr = info[4][0]
+                try:
+                    ip = ipaddress.ip_address(addr)
+                    if ip.is_private or ip.is_loopback or ip.is_link_local or ip.is_reserved:
+                        return True
+                except ValueError:
+                    continue
+        except socket.gaierror:
+            # DNS resolution failed — allow the request; httpx will handle the error
+            return False
+    except Exception:
+        return False
+    return False
 
 
 def _extract_text(html: str, max_chars: int = 10000) -> str:
@@ -29,6 +66,9 @@ async def _execute(args: dict) -> str:
         return "Please provide a URL."
     if not url.startswith(("http://", "https://")):
         url = "https://" + url
+
+    if _is_private_url(url):
+        return "Access denied: requests to private/internal network addresses are blocked."
 
     try:
         async with httpx.AsyncClient(timeout=15, follow_redirects=True) as client:

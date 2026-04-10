@@ -105,4 +105,5 @@ register_tool(
         "required": ["language", "code"],
     },
     execute=_execute,
+    admin_only=True,
 )
