@@ -1,6 +1,6 @@
 [project]
 name = "openlama"
-version = "0.1.945"
+version = "0.1.946"
 description = "Personal AI agent bot — Telegram + Ollama"
 readme = "README.md"
 requires-python = ">=3.11"
