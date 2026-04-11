@@ -13,7 +13,7 @@ from openlama.logger import get_logger
 
 logger = get_logger("google_auth")
 
-# All scopes we request (covers all Google services)
+# Default scopes (works with personal Google accounts)
 ALL_SCOPES = [
     "https://www.googleapis.com/auth/gmail.modify",
     "https://www.googleapis.com/auth/gmail.settings.basic",
@@ -27,6 +27,10 @@ ALL_SCOPES = [
     "https://www.googleapis.com/auth/tasks",
     "https://www.googleapis.com/auth/forms.body",
     "https://www.googleapis.com/auth/forms.responses.readonly",
+]
+
+# Workspace-only scopes (Keep, Chat, Apps Script) — only added if configured
+_WORKSPACE_SCOPES = [
     "https://www.googleapis.com/auth/keep",
     "https://www.googleapis.com/auth/chat.spaces",
     "https://www.googleapis.com/auth/chat.messages",
@@ -74,6 +78,14 @@ _SERVICE_SCOPE_MAP = {
         "https://www.googleapis.com/auth/script.processes",
     ],
 }
+
+
+def _get_scopes_for_auth() -> list[str]:
+    """Return scopes to request. Adds Workspace scopes if google_workspace=true."""
+    scopes = list(ALL_SCOPES)
+    if get_config("google_workspace", "false").lower() in ("true", "1", "yes"):
+        scopes.extend(_WORKSPACE_SCOPES)
+    return scopes
 
 
 def _get_credentials_json() -> dict | None:
@@ -208,7 +220,8 @@ async def _action_auth(args: dict) -> str:
         )
 
     try:
-        flow = InstalledAppFlow.from_client_config(creds_json, ALL_SCOPES)
+        scopes = _get_scopes_for_auth()
+        flow = InstalledAppFlow.from_client_config(creds_json, scopes)
         creds = await asyncio.to_thread(flow.run_local_server, port=0)
         _save_token(creds)
         from openlama.database import set_setting

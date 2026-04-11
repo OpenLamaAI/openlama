@@ -1122,7 +1122,7 @@ def google_auth():
         return
 
     try:
-        from openlama.tools.google_auth import _get_credentials_json, ALL_SCOPES, _save_token
+        from openlama.tools.google_auth import _get_credentials_json, _get_scopes_for_auth, _save_token
         from google_auth_oauthlib.flow import InstalledAppFlow
     except ImportError:
         console.print("[red]Google libraries not installed. Run: pip install google-auth google-auth-oauthlib google-api-python-client[/red]")
@@ -1134,7 +1134,7 @@ def google_auth():
         return
 
     try:
-        flow = InstalledAppFlow.from_client_config(creds_json, ALL_SCOPES)
+        flow = InstalledAppFlow.from_client_config(creds_json, _get_scopes_for_auth())
         creds = flow.run_local_server(port=0)
         _save_token(creds)
         from openlama.database import set_setting

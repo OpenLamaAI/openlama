@@ -971,7 +971,7 @@ def _run_google_auth():
     """Run the Google OAuth flow during setup."""
     try:
         from google_auth_oauthlib.flow import InstalledAppFlow
-        from openlama.tools.google_auth import ALL_SCOPES, _get_credentials_json, _save_token
+        from openlama.tools.google_auth import _get_scopes_for_auth, _get_credentials_json, _save_token
 
         creds_json = _get_credentials_json()
         if not creds_json:
@@ -979,7 +979,7 @@ def _run_google_auth():
             _save("google_enabled", "false")
             return
 
-        flow = InstalledAppFlow.from_client_config(creds_json, ALL_SCOPES)
+        flow = InstalledAppFlow.from_client_config(creds_json, _get_scopes_for_auth())
         creds = flow.run_local_server(port=0)
         _save_token(creds)
         _save("google_enabled", "true")
