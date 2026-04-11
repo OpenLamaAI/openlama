@@ -1877,6 +1877,7 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     uid = update.effective_user.id
     data = q.data or ""
+    logger.info("callback received: uid=%d, data=%s", uid, data[:80])
 
     if data == "noop":
         return
@@ -1886,9 +1887,12 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         approved = data.startswith("tool_ok:")
         confirm_id = data.split(":", 1)[1]
         tool_name = confirm_id.split(":")[1] if ":" in confirm_id else "tool"
+        logger.info("tool confirm: approved=%s, confirm_id=%s, pending_keys=%s",
+                     approved, confirm_id, list(_pending_confirms.keys()))
         future = _pending_confirms.get(confirm_id)
         if future and not future.done():
             future.set_result(approved)
+            logger.info("tool confirm: future resolved for %s", tool_name)
             if approved:
                 await q.edit_message_text(
                     f"✅ <b>{tool_name}</b> — allowed, executing...",
