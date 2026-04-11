@@ -63,6 +63,26 @@ def init_tools():
         import shutil
         if shutil.which("tmux") and shutil.which("claude"):
             import openlama.tools.code_agent
+    # Google integration: requires google SDK + enabled in config
+    if get_config("google_enabled", "false").lower() in ("true", "1", "yes"):
+        try:
+            import google.auth  # noqa: F401
+            import openlama.tools.google_auth
+            import openlama.tools.google_gmail
+            import openlama.tools.google_calendar
+            import openlama.tools.google_drive
+            import openlama.tools.google_docs
+            import openlama.tools.google_sheets
+            import openlama.tools.google_slides
+            import openlama.tools.google_contacts
+            import openlama.tools.google_tasks
+            import openlama.tools.google_forms
+            import openlama.tools.google_keep
+            import openlama.tools.google_people
+            import openlama.tools.google_chat
+            import openlama.tools.google_appscript
+        except ImportError:
+            pass
     # Conditional tools — whisper: auto-detect if faster-whisper is installed
     stt_config = get_config("stt_enabled", "auto").lower()
     if stt_config != "false":

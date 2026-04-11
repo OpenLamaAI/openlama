@@ -18,6 +18,10 @@ dependencies = [
     "mcp>=1.0",
     "croniter>=1.0",
     "prompt-toolkit>=3.0",
+    "google-auth>=2.0",
+    "google-auth-oauthlib>=1.0",
+    "google-api-python-client>=2.0",
+    "cryptography>=42.0",
 ]
 
 [project.optional-dependencies]

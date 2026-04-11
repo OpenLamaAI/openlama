@@ -95,6 +95,7 @@ _DEFAULTS = {
     "stt_enabled": "auto",
     "obsidian_vault": "",
     "code_agent_confirm": "true",
+    "google_enabled": "false",
     "show_token_stats": "true",
     "comfy_start_cmd": "",
     "comfy_auto_stop": "true",

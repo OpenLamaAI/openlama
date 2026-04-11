@@ -92,6 +92,12 @@ def main(ctx):
       openlama cron delete ID     Delete a scheduled task
 
     \b
+    Google Integration:
+      openlama google auth        Authenticate with Google (opens browser)
+      openlama google status      Show Google connection status
+      openlama google revoke      Disconnect Google account
+
+    \b
     Configuration:
       openlama config list        View all settings
       openlama config get KEY     Get a single setting
@@ -1090,6 +1096,111 @@ def mcp_remove(name):
         click.echo(f"MCP server '{name}' removed.")
     else:
         click.echo(f"MCP server '{name}' not found.")
+
+
+# ── Google commands ─────────────────────────────
+
+@main.group()
+def google():
+    """Manage Google integration (Gmail, Calendar, Drive, etc.)."""
+    pass
+
+
+@google.command("auth")
+def google_auth():
+    """Authenticate with Google (opens browser)."""
+    from rich.console import Console
+    console = Console()
+
+    try:
+        from openlama.database import init_db, get_setting
+        from openlama.config import DATA_DIR
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        init_db()
+    except Exception as e:
+        click.echo(f"Database error: {e}")
+        return
+
+    try:
+        from openlama.tools.google_auth import _get_credentials_json, ALL_SCOPES, _save_token
+        from google_auth_oauthlib.flow import InstalledAppFlow
+    except ImportError:
+        console.print("[red]Google libraries not installed. Run: pip install google-auth google-auth-oauthlib google-api-python-client[/red]")
+        return
+
+    creds_json = _get_credentials_json()
+    if not creds_json:
+        console.print("[red]No OAuth credentials configured. Run 'openlama setup' first.[/red]")
+        return
+
+    try:
+        flow = InstalledAppFlow.from_client_config(creds_json, ALL_SCOPES)
+        creds = flow.run_local_server(port=0)
+        _save_token(creds)
+        from openlama.database import set_setting
+        set_setting("google_enabled", "true")
+        email = get_setting("google_account_email") or "unknown"
+        console.print(f"[green]✓ Authenticated as {email}[/green]")
+    except Exception as e:
+        console.print(f"[red]Authentication failed: {e}[/red]")
+
+
+@google.command("status")
+def google_status():
+    """Show Google authentication status."""
+    from rich.console import Console
+    console = Console()
+
+    try:
+        from openlama.database import init_db, get_setting
+        from openlama.config import DATA_DIR, get_config
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        init_db()
+    except Exception:
+        click.echo("Database not initialized. Run 'openlama setup'.")
+        return
+
+    enabled = get_config("google_enabled")
+    if enabled.lower() not in ("true", "1", "yes"):
+        console.print("[dim]Google integration: disabled[/dim]")
+        return
+
+    email = get_setting("google_account_email") or "not set"
+    token = get_setting("google_token_enc")
+    has_creds = bool(get_setting("google_credentials_enc"))
+
+    console.print(f"  Google integration: [green]enabled[/green]")
+    console.print(f"  Credentials: {'✓ stored' if has_creds else '✗ not configured'}")
+    console.print(f"  Token: {'✓ stored' if token else '✗ not authenticated'}")
+    console.print(f"  Account: {email}")
+
+    if token:
+        try:
+            from openlama.tools.google_auth import get_google_creds
+            creds = get_google_creds()
+            if creds:
+                console.print(f"  Status: [green]✓ valid[/green]")
+            else:
+                console.print(f"  Status: [yellow]⚠ token expired, re-run 'openlama google auth'[/yellow]")
+        except Exception as e:
+            console.print(f"  Status: [red]✗ error: {e}[/red]")
+
+
+@google.command("revoke")
+def google_revoke():
+    """Disconnect Google account."""
+    try:
+        from openlama.database import init_db, set_setting
+        from openlama.config import DATA_DIR
+        DATA_DIR.mkdir(parents=True, exist_ok=True)
+        init_db()
+        set_setting("google_token_enc", "")
+        set_setting("google_account_email", "")
+        set_setting("google_enabled", "false")
+        click.echo("Google integration disconnected.")
+        _restart_daemon_if_running_cli()
+    except Exception as e:
+        click.echo(f"Error: {e}")
 
 
 if __name__ == "__main__":

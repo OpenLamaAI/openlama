@@ -606,6 +606,49 @@ def fix_launchd_env():
     install()
 
 
+def check_google() -> CheckResult:
+    """Check Google integration status."""
+    enabled = get_config("google_enabled", "false").lower() in ("true", "1", "yes")
+    if not enabled:
+        return CheckResult("Google integration", "ok", "Disabled")
+
+    try:
+        import google.auth  # noqa: F401
+    except ImportError:
+        return CheckResult(
+            "Google integration", "fail",
+            "Enabled but google libraries not installed. Run: pip install google-auth google-auth-oauthlib google-api-python-client",
+            fixable=True, fix_action="Install Google Python libraries",
+        )
+
+    try:
+        from openlama.database import get_setting
+        email = get_setting("google_account_email")
+        token = get_setting("google_token_enc")
+        if not token:
+            return CheckResult(
+                "Google integration", "warn",
+                "Enabled but not authenticated. Run 'openlama google auth'.",
+            )
+        from openlama.tools.google_auth import get_google_creds
+        creds = get_google_creds()
+        if creds:
+            return CheckResult("Google integration", "ok", f"Authenticated ({email or '?'})")
+        return CheckResult(
+            "Google integration", "warn",
+            "Token expired or invalid. Run 'openlama google auth' to re-authenticate.",
+        )
+    except Exception as e:
+        return CheckResult("Google integration", "warn", f"Check failed: {e}")
+
+
+def fix_google():
+    """Install Google Python libraries."""
+    import subprocess
+    subprocess.run([sys.executable, "-m", "pip", "install",
+                    "google-auth", "google-auth-oauthlib", "google-api-python-client"], check=False)
+
+
 def check_allowlist() -> CheckResult:
     """Check allow list status."""
     try:
@@ -645,6 +688,7 @@ async def run_checks() -> DoctorReport:
         check_mcp_config,
         check_admin_password,
         check_allowlist,
+        check_google,
         check_comfyui_workflows,
     ]:
         try:
@@ -682,6 +726,7 @@ async def run_fixes(report: DoctorReport) -> list[str]:
         "Prompts directory": fix_prompts_dir,
         "Daemon process": fix_daemon,
         "Python dependencies": fix_python_deps,
+        "Google integration": fix_google,
     }
 
     results = []

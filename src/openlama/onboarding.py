@@ -46,6 +46,7 @@ def run_setup():
         _step_features()
         _step_stt()
         _step_obsidian()
+        _step_google()
     except KeyboardInterrupt:
         console.print("\n\n[yellow]Setup cancelled.[/yellow]")
         sys.exit(1)
@@ -116,7 +117,7 @@ def _save(key: str, value: str):
 
 def _step_ollama():
     """Step 1: Check/install Ollama or connect to remote server."""
-    console.print("\n  [bold]● Step 1/7 — Ollama[/bold]\n")
+    console.print("\n  [bold]● Step 1/8 — Ollama[/bold]\n")
 
     import questionary
 
@@ -271,7 +272,7 @@ def _pull_model_with_progress(model: str):
 
 def _step_models():
     """Step 2: Select and download models."""
-    console.print("\n  [bold]● Step 2/7 — Models[/bold]\n")
+    console.print("\n  [bold]● Step 2/8 — Models[/bold]\n")
 
     from openlama.config import is_ollama_remote
 
@@ -376,7 +377,7 @@ def _step_models():
 
 def _step_channel():
     """Step 3: Channel + bot token."""
-    console.print("\n  [bold]● Step 3/7 — Channel[/bold]\n")
+    console.print("\n  [bold]● Step 3/8 — Channel[/bold]\n")
 
     existing_token = _get_existing("telegram_bot_token")
     if existing_token:
@@ -417,7 +418,7 @@ def _step_channel():
 
 def _step_password():
     """Step 4: Admin password."""
-    console.print("\n  [bold]● Step 4/7 — Password[/bold]\n")
+    console.print("\n  [bold]● Step 4/8 — Password[/bold]\n")
 
     existing_hash = _get_existing("admin_password_hash")
     if existing_hash:
@@ -549,7 +550,7 @@ def _detect_comfyui() -> dict | None:
 
 def _step_features():
     """Step 5: Optional features."""
-    console.print("\n  [bold]● Step 5/7 — Features[/bold]\n")
+    console.print("\n  [bold]● Step 5/8 — Features[/bold]\n")
 
     import questionary
 
@@ -601,7 +602,7 @@ def _step_features():
 
 def _step_stt():
     """Step 6: Speech-to-text (STT) for voice messages."""
-    console.print("\n  [bold]● Step 6/7 — Voice Recognition (STT)[/bold]\n")
+    console.print("\n  [bold]● Step 6/8 — Voice Recognition (STT)[/bold]\n")
 
     import questionary
 
@@ -657,7 +658,7 @@ def _find_obsidian_cli() -> str | None:
 
 def _step_obsidian():
     """Step 7: Obsidian vault integration."""
-    console.print("\n  [bold]● Step 7/7 — Obsidian Notes[/bold]\n")
+    console.print("\n  [bold]● Step 7/8 — Obsidian Notes[/bold]\n")
 
     import questionary
 
@@ -859,3 +860,143 @@ def _pip_install(package: str) -> bool:
 
     console.print("  [red]✗ Installation failed[/red]")
     return False
+
+
+def _step_google():
+    """Step 8: Google integration (optional)."""
+    console.print("\n  [bold]● Step 8/8 — Google Integration[/bold]\n")
+
+    import questionary
+
+    existing_enabled = _get_existing("google_enabled")
+    existing_email = _get_existing("google_account_email")
+
+    if existing_email:
+        console.print(f"  [dim]Currently connected: {existing_email}[/dim]")
+
+    console.print("  Connect Google to manage Gmail, Calendar, Drive, Docs, Sheets, Contacts, Tasks, and more.")
+    console.print("  [dim]Requires a Google Cloud OAuth credentials.json file.[/dim]")
+
+    enable = questionary.confirm(
+        "  Enable Google integration?",
+        default=bool(existing_enabled and existing_enabled.lower() in ("true", "1", "yes")),
+    ).ask()
+
+    if not enable:
+        if existing_enabled and existing_enabled.lower() in ("true", "1", "yes"):
+            console.print("  ✓ Keeping existing Google configuration")
+        else:
+            _save("google_enabled", "false")
+            console.print("  ✓ Google integration disabled (enable later with 'openlama setup')")
+        return
+
+    # Check if credentials already stored
+    existing_creds = _get_existing("google_credentials_enc")
+    if existing_creds:
+        console.print("  [dim]OAuth credentials already configured.[/dim]")
+        reconfigure = questionary.confirm("  Reconfigure OAuth credentials?", default=False).ask()
+        if not reconfigure:
+            # Try to run auth if no token yet
+            existing_token = _get_existing("google_token_enc")
+            if not existing_token:
+                console.print("\n  Opening browser for Google authentication...")
+                _run_google_auth()
+            else:
+                console.print("  ✓ Keeping existing Google configuration")
+                _save("google_enabled", "true")
+            return
+
+    # Accept credentials
+    console.print("\n  To get credentials.json:")
+    console.print("    1. Go to https://console.cloud.google.com/")
+    console.print("    2. Create a project and enable Google APIs (Gmail, Calendar, Drive, etc.)")
+    console.print("    3. Create OAuth client ID (Desktop app type)")
+    console.print("    4. Download the JSON file\n")
+
+    creds_input = questionary.text(
+        "  Path to credentials.json (or paste JSON):",
+    ).ask()
+
+    if not creds_input or not creds_input.strip():
+        _save("google_enabled", "false")
+        console.print("  [yellow]Skipped. Enable later with 'openlama setup'[/yellow]")
+        return
+
+    creds_input = creds_input.strip()
+
+    # Parse — either file path or JSON string
+    creds_json = None
+    if creds_input.startswith("{"):
+        try:
+            creds_json = json.loads(creds_input)
+        except json.JSONDecodeError:
+            console.print("  [red]✗ Invalid JSON[/red]")
+            _save("google_enabled", "false")
+            return
+    else:
+        creds_path = Path(creds_input).expanduser()
+        if not creds_path.exists():
+            console.print(f"  [red]✗ File not found: {creds_path}[/red]")
+            _save("google_enabled", "false")
+            return
+        try:
+            creds_json = json.loads(creds_path.read_text())
+        except (json.JSONDecodeError, OSError) as e:
+            console.print(f"  [red]✗ Failed to read: {e}[/red]")
+            _save("google_enabled", "false")
+            return
+
+    # Validate basic structure
+    if not (creds_json.get("installed") or creds_json.get("web")):
+        console.print("  [red]✗ Invalid credentials format (expected 'installed' or 'web' key)[/red]")
+        _save("google_enabled", "false")
+        return
+
+    # Encrypt and store
+    try:
+        from openlama.crypto import encrypt
+        _save("google_credentials_enc", encrypt(json.dumps(creds_json)))
+        console.print("  ✓ Credentials stored (encrypted)")
+    except Exception as e:
+        console.print(f"  [red]✗ Failed to store credentials: {e}[/red]")
+        _save("google_enabled", "false")
+        return
+
+    # Run OAuth flow
+    console.print("\n  Opening browser for Google authentication...")
+    _run_google_auth()
+
+
+def _run_google_auth():
+    """Run the Google OAuth flow during setup."""
+    try:
+        from google_auth_oauthlib.flow import InstalledAppFlow
+        from openlama.tools.google_auth import ALL_SCOPES, _get_credentials_json, _save_token
+
+        creds_json = _get_credentials_json()
+        if not creds_json:
+            console.print("  [red]✗ No credentials found[/red]")
+            _save("google_enabled", "false")
+            return
+
+        flow = InstalledAppFlow.from_client_config(creds_json, ALL_SCOPES)
+        creds = flow.run_local_server(port=0)
+        _save_token(creds)
+        _save("google_enabled", "true")
+
+        # Show connected account
+        try:
+            from openlama.database import get_setting
+            email = get_setting("google_account_email") or "unknown"
+            console.print(f"  [green]✓ Connected as {email}[/green]")
+            console.print("  Enabled services: Gmail, Calendar, Drive, Docs, Sheets, Slides, Contacts, Tasks, Forms, Keep")
+        except Exception:
+            console.print("  [green]✓ Google authentication successful[/green]")
+
+    except ImportError:
+        console.print("  [red]✗ Google libraries not installed. Run: pip install google-auth google-auth-oauthlib google-api-python-client[/red]")
+        _save("google_enabled", "false")
+    except Exception as e:
+        console.print(f"  [red]✗ Authentication failed: {e}[/red]")
+        console.print("  [dim]You can retry later with 'openlama google auth'[/dim]")
+        _save("google_enabled", "false")
