@@ -61,7 +61,7 @@ class TelegramChannel(Channel):
         except RuntimeError:
             asyncio.set_event_loop(asyncio.new_event_loop())
 
-        self._app = Application.builder().token(token).post_init(post_init).build()
+        self._app = Application.builder().token(token).post_init(post_init).concurrent_updates(True).build()
         register_all_handlers(self._app)
         logger.info("Telegram bot starting polling...")
         self._app.run_polling(allowed_updates=Update.ALL_TYPES)
@@ -154,7 +154,7 @@ def main():
     # Python 3.14 compat
     asyncio.set_event_loop(asyncio.new_event_loop())
 
-    app = Application.builder().token(token).post_init(post_init).build()
+    app = Application.builder().token(token).post_init(post_init).concurrent_updates(True).build()
     register_all_handlers(app)
 
     # Post-init lifecycle hooks
