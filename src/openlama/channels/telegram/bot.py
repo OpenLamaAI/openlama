@@ -13,7 +13,7 @@ from openlama.auth import hash_password
 from openlama.tools import init_tools
 from openlama.channels.telegram.handlers import register_all_handlers, post_init
 from openlama.channels.base import Channel
-from openlama.logger import get_logger
+from openlama.logger import setup_logger, get_logger
 
 logger = get_logger("telegram.bot")
 
@@ -45,6 +45,9 @@ class TelegramChannel(Channel):
         self._app: Application | None = None
 
     async def start(self):
+        from openlama.config import DATA_DIR
+        setup_logger(log_file=DATA_DIR / "openlama.log")
+
         validate_env()
         init_db()
         setup_admin_password()
@@ -138,6 +141,9 @@ async def _stop_mcp_servers(app):
 
 def main():
     """Standalone entry point for running just the Telegram bot."""
+    from openlama.config import DATA_DIR
+    setup_logger(log_file=DATA_DIR / "openlama.log")
+
     validate_env()
     init_db()
     setup_admin_password()

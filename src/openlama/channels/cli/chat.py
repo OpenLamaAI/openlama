@@ -1319,10 +1319,14 @@ async def _process_input(uid: int, user_input: str):
 
     try:
         _status["text"] = "Thinking..."
+        _approved_tools: set[str] = set()
+
         async def _cli_confirm(tool_name: str, summary: str) -> bool:
             """CLI confirmation for dangerous tools."""
             from openlama.config import get_config_bool
             if not get_config_bool("tool_confirm_dangerous", True):
+                return True
+            if tool_name in _approved_tools:
                 return True
             _status["text"] = ""  # Clear spinner
             async with in_terminal():
@@ -1332,7 +1336,10 @@ async def _process_input(uid: int, user_input: str):
                     answer = await asyncio.to_thread(
                         input, "  Allow? (y/N): "
                     )
-                    return answer.strip().lower() in ("y", "yes")
+                    approved = answer.strip().lower() in ("y", "yes")
+                    if approved:
+                        _approved_tools.add(tool_name)
+                    return approved
                 except (EOFError, KeyboardInterrupt):
                     return False
 

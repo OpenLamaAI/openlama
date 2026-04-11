@@ -130,7 +130,7 @@ async def _telegram_confirm(chat_id: int, bot, tool_name: str, summary: str) -> 
         ]
     ])
 
-    await bot.send_message(
+    msg = await bot.send_message(
         chat_id=chat_id,
         text=f"⚠️ <b>Tool confirmation required</b>\n\n"
              f"<b>{tool_name}</b>\n"
@@ -144,6 +144,14 @@ async def _telegram_confirm(chat_id: int, bot, tool_name: str, summary: str) -> 
         result = await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT)
         return result
     except asyncio.TimeoutError:
+        # Remove buttons on timeout
+        try:
+            await msg.edit_text(
+                f"⏰ <b>{tool_name}</b> — timed out (auto-denied)",
+                parse_mode="HTML",
+            )
+        except Exception:
+            pass
         return False
     finally:
         _pending_confirms.pop(confirm_id, None)
@@ -848,7 +856,11 @@ async def _do_chat_inner(
 
     messages = _build_messages(final_system, ctx_items, full_text, summary)
 
-    # Send placeholder
+    # Send typing indicator + placeholder
+    try:
+        await update.effective_chat.send_action("typing")
+    except Exception:
+        pass
     placeholder = await update.message.reply_text("💬 Thinking...")
     result = {}
 
@@ -878,16 +890,24 @@ async def _do_chat_inner(
 
             async def _on_progress(status_text: str):
                 try:
+                    await update.effective_chat.send_action("typing")
                     await placeholder.edit_text(status_text)
                 except Exception:
                     pass
 
             # Dangerous tool confirmation callback
+            # Once approved in this turn, don't ask again for the same tool
             chat_id = update.effective_chat.id
             bot = update.get_bot()
+            _approved_tools: set[str] = set()
 
             async def _confirm_fn(tool_name: str, summary: str) -> bool:
-                return await _telegram_confirm(chat_id, bot, tool_name, summary)
+                if tool_name in _approved_tools:
+                    return True
+                result = await _telegram_confirm(chat_id, bot, tool_name, summary)
+                if result:
+                    _approved_tools.add(tool_name)
+                return result
 
             answer, tool_image_paths, tool_usage = await handle_tool_calls(
                 uid, model, messages_with_assistant, tool_calls, settings, think,
@@ -1865,13 +1885,22 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("tool_ok:") or data.startswith("tool_no:"):
         approved = data.startswith("tool_ok:")
         confirm_id = data.split(":", 1)[1]
+        tool_name = confirm_id.split(":")[1] if ":" in confirm_id else "tool"
         future = _pending_confirms.get(confirm_id)
         if future and not future.done():
             future.set_result(approved)
-            status = "✅ Allowed" if approved else "❌ Denied"
-            await q.edit_message_text(f"{status}: {confirm_id.split(':')[2]}")
+            if approved:
+                await q.edit_message_text(
+                    f"✅ <b>{tool_name}</b> — allowed, executing...",
+                    parse_mode="HTML",
+                )
+            else:
+                await q.edit_message_text(
+                    f"❌ <b>{tool_name}</b> — denied",
+                    parse_mode="HTML",
+                )
         else:
-            await q.edit_message_text("⏰ Confirmation expired or already handled.")
+            await q.edit_message_text("⏰ Expired or already handled.")
         return
 
     # ── Login button (no auth required) ──
