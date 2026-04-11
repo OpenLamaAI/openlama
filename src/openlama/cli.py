@@ -46,11 +46,22 @@ def _check_for_update():
                       headers={"Cache-Control": "no-cache"})
         if r.status_code == 200:
             latest = r.json().get("info", {}).get("version", "")
-            if cache_file:
-                cache_file.parent.mkdir(parents=True, exist_ok=True)
-                cache_file.write_text(f"{time.time()}|{latest}")
             if latest and _ver_tuple(latest) > _ver_tuple(__version__):
-                click.echo(f"  ⬆ Update available: v{__version__} → v{latest}  (openlama update)")
+                # Only notify if actually installable (Simple API has the files)
+                r2 = httpx.get("https://pypi.org/simple/openlama/", timeout=3,
+                               headers={"Accept": "application/vnd.pypi.simple.v1+json",
+                                        "Cache-Control": "no-cache"})
+                installable = False
+                if r2.status_code == 200:
+                    installable = any(latest in f.get("filename", "") for f in r2.json().get("files", []))
+                if installable:
+                    if cache_file:
+                        cache_file.parent.mkdir(parents=True, exist_ok=True)
+                        cache_file.write_text(f"{time.time()}|{latest}")
+                    click.echo(f"  ⬆ Update available: v{__version__} → v{latest}  (openlama update)")
+            elif cache_file:
+                cache_file.parent.mkdir(parents=True, exist_ok=True)
+                cache_file.write_text(f"{time.time()}|{latest or __version__}")
     except Exception:
         pass
 
@@ -450,31 +461,36 @@ def update(ollama_only, self_only):
     if not ollama_only:
         console.print(f"\n  [bold]Updating openlama...[/bold] (current: v{old_ver})")
         try:
-            # Check PyPI for latest version — JSON API updates faster than Simple API
+            # Check PyPI for latest version.
+            # Only show "update available" when the version is actually installable
+            # (present in Simple API with files), not just announced in JSON API.
             import httpx as _httpx
             latest_ver = None
+            installable = False
             try:
-                # Primary: JSON API (faster CDN propagation)
+                # Step 1: Get latest version from JSON API (updates fast)
                 r = _httpx.get("https://pypi.org/pypi/openlama/json", timeout=5,
                                headers={"Cache-Control": "no-cache"})
                 if r.status_code == 200:
                     latest_ver = r.json().get("info", {}).get("version", "")
-                if not latest_ver:
-                    # Fallback: Simple API
+
+                # Step 2: Verify it's actually installable via Simple API (what uv/pip use)
+                if latest_ver and _ver_tuple(latest_ver) > _ver_tuple(old_ver):
                     r2 = _httpx.get("https://pypi.org/simple/openlama/", timeout=5,
                                     headers={"Accept": "application/vnd.pypi.simple.v1+json",
                                              "Cache-Control": "no-cache"})
                     if r2.status_code == 200:
-                        data = r2.json()
-                        versions = [v for v in data.get("versions", []) if not any(c in v for c in ("a", "b", "rc", "dev"))]
-                        if versions:
-                            latest_ver = sorted(versions, key=_ver_tuple)[-1]
+                        files = r2.json().get("files", [])
+                        installable = any(latest_ver in f.get("filename", "") for f in files)
             except Exception:
                 pass
 
-            if latest_ver and _ver_tuple(latest_ver) <= _ver_tuple(old_ver):
+            if not latest_ver or _ver_tuple(latest_ver) <= _ver_tuple(old_ver):
                 console.print(f"  Already up to date (v{old_ver})")
-            elif latest_ver:
+            elif not installable:
+                console.print(f"  v{latest_ver} published but not yet available in package index.")
+                console.print(f"  Wait 1-2 minutes and try again.")
+            else:
                 console.print(f"  [dim]Latest: v{latest_ver}[/dim]")
 
                 uv_bin = shutil.which("uv")
@@ -496,35 +512,17 @@ def update(ollama_only, self_only):
 
                 updated = False
                 if method == "uv_tool":
-                    # Strategy: try pinned version first (precise), then unpinned (fallback).
-                    # uv's Simple API CDN can lag behind JSON API, so pinned may fail
-                    # if CDN hasn't propagated yet — unpinned catches that case.
-                    for attempt, cmd in enumerate([
-                        f"{uv_bin} tool install 'openlama=={latest_ver}' --force --refresh",
+                    # Simple API confirmed the version exists, so --refresh will find it.
+                    result = subprocess.run(
                         f"{uv_bin} tool install openlama --force --refresh",
-                    ], 1):
-                        result = subprocess.run(
-                            cmd, capture_output=True, text=True, timeout=120, shell=True,
-                        )
-                        if result.returncode == 0:
-                            # Verify the correct version was actually installed
-                            vcheck = subprocess.run(
-                                ["openlama", "--version"], capture_output=True, text=True, timeout=10,
-                            )
-                            got = vcheck.stdout.strip().split()[-1] if vcheck.returncode == 0 else ""
-                            if got == latest_ver:
-                                updated = True
-                                break
-                            # Installed but wrong version — try next strategy
-                            if attempt == 1:
-                                continue
-                        elif attempt == 1:
-                            continue  # Pinned failed, try unpinned
-
-                    if not updated:
-                        console.print(f"  [yellow]uv couldn't install v{latest_ver}, trying pip...[/yellow]")
+                        capture_output=True, text=True, timeout=120, shell=True,
+                    )
+                    if result.returncode == 0:
+                        updated = True
+                    else:
+                        console.print(f"  [yellow]uv failed, trying pip...[/yellow]")
                         r2 = subprocess.run(
-                            [sys.executable, "-m", "pip", "install", f"openlama=={latest_ver}", "--no-cache-dir"],
+                            [sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
                             capture_output=True, timeout=120,
                         )
                         if r2.returncode == 0:
@@ -543,13 +541,10 @@ def update(ollama_only, self_only):
 
                 ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
                 new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
-                if new_ver == latest_ver:
-                    console.print(f"  [green]Updated: v{old_ver} → v{new_ver}[/green]")
-                elif new_ver != old_ver:
+                if new_ver != old_ver:
                     console.print(f"  [green]Updated: v{old_ver} → v{new_ver}[/green]")
                 else:
-                    console.print(f"  [yellow]v{latest_ver} not yet available in package index (CDN propagation delay).[/yellow]")
-                    console.print(f"  [yellow]Wait 1-2 minutes and try again.[/yellow]")
+                    console.print(f"  [yellow]Update failed. Try: uv tool install openlama --force --refresh[/yellow]")
             else:
                 console.print(f"  Could not check PyPI. Try: uv tool install openlama --force --refresh")
         except Exception as e:
