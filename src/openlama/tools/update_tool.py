@@ -51,15 +51,10 @@ async def _do_update() -> str:
     method = ""
 
     if uv_bin:
-        import os as _os
-        clean_env = _os.environ.copy()
-        clean_env.pop("VIRTUAL_ENV", None)
-        clean_env.pop("UV_TOOL_DIR", None)
         result = await asyncio.to_thread(
             lambda: subprocess.run(
-                [uv_bin, "tool", "install", "openlama", "--force", "--refresh"],
-                capture_output=True, text=True, timeout=120,
-                start_new_session=True, env=clean_env,
+                f"{uv_bin} tool install openlama --force --refresh",
+                capture_output=True, text=True, timeout=120, shell=True,
             )
         )
         if result.returncode == 0:
