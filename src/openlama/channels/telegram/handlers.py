@@ -99,7 +99,7 @@ logger = get_logger("telegram.handlers")
 
 # Pending confirmations: {confirm_id: asyncio.Future}
 _pending_confirms: dict[str, asyncio.Future] = {}
-_CONFIRM_TIMEOUT = 60  # seconds
+_CONFIRM_TIMEOUT = 120  # seconds (generous — Telegram query expiry is handled gracefully)
 
 
 def _make_confirm_id(chat_id: int, tool_name: str) -> str:
@@ -1873,7 +1873,10 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     q = update.callback_query
     if not q or not update.effective_user:
         return
-    await q.answer()
+    try:
+        await q.answer()
+    except Exception:
+        pass  # Query may have expired — still process the callback
 
     uid = update.effective_user.id
     data = q.data or ""
