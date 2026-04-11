@@ -520,13 +520,8 @@ def update(ollama_only, self_only):
                     if result.returncode == 0:
                         updated = True
                     else:
-                        console.print(f"  [yellow]uv failed, trying pip...[/yellow]")
-                        r2 = subprocess.run(
-                            [sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
-                            capture_output=True, timeout=120,
-                        )
-                        if r2.returncode == 0:
-                            updated = True
+                        # Don't fall back to pip — it breaks uv tool environments
+                        console.print(f"  [yellow]uv failed: {result.stderr.strip()[:120]}[/yellow]")
                 elif method == "pipx":
                     r2 = subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
                     if r2.returncode == 0:
