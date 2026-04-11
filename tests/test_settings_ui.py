@@ -109,3 +109,14 @@ def test_settings_keyboard():
     kb = settings_keyboard(uid, "test-model")
     # Should have rows for all params + keep_alive + context + reset
     assert len(kb.inline_keyboard) >= 8
+
+
+def test_settings_keyboard_has_tool_confirm():
+    from database import get_user
+    uid = 500002
+    get_user(uid)
+    kb = settings_keyboard(uid, "test-model")
+    all_buttons = [b.text for row in kb.inline_keyboard for b in row]
+    assert any("Tool Confirm" in b for b in all_buttons), "Settings should include Tool Confirm toggle"
+    all_data = [b.callback_data for row in kb.inline_keyboard for b in row]
+    assert "toggle:tool_confirm_dangerous" in all_data

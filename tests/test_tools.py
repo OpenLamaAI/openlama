@@ -268,9 +268,10 @@ async def test_process_empty_action():
 
 
 @pytest.mark.asyncio
-async def test_process_pm2():
+async def test_process_unknown_action_blocked():
+    """Unknown actions should be rejected (no fallback to arbitrary commands)."""
     result = await execute_tool("process_manager", {"action": "pm2", "target": "list"}, 0)
-    assert "exit code" in result
+    assert "Unknown action" in result
 
 
 # ── nonexistent tool ──
