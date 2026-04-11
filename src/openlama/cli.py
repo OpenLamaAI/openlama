@@ -496,12 +496,12 @@ def update(ollama_only, self_only):
 
                 if method == "uv_tool":
                     result = subprocess.run(
-                        [uv_bin, "tool", "install", f"openlama>={latest_ver}", "--force", "--refresh"],
+                        [uv_bin, "tool", "install", f"openlama=={latest_ver}", "--force", "--refresh"],
                         capture_output=True, text=True, timeout=120,
                     )
                     if result.returncode != 0:
                         console.print(f"  [yellow]uv failed, trying pip...[/yellow]")
-                        subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
+                        subprocess.run([sys.executable, "-m", "pip", "install", f"openlama=={latest_ver}", "--no-cache-dir"],
                                        capture_output=True, timeout=120)
                 elif method == "pipx":
                     subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)

@@ -53,7 +53,7 @@ async def _do_update() -> str:
     if uv_bin:
         result = await asyncio.to_thread(
             lambda: subprocess.run(
-                [uv_bin, "tool", "upgrade", "openlama"],
+                [uv_bin, "tool", "install", "openlama", "--force", "--refresh"],
                 capture_output=True, text=True, timeout=120,
             )
         )
