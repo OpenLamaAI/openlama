@@ -1889,7 +1889,8 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if data.startswith("tool_ok:") or data.startswith("tool_no:"):
         approved = data.startswith("tool_ok:")
         confirm_id = data.split(":", 1)[1]
-        tool_name = confirm_id.split(":")[1] if ":" in confirm_id else "tool"
+        parts = confirm_id.split(":")
+        tool_name = parts[2] if len(parts) > 2 else "tool"
         logger.info("tool confirm: approved=%s, confirm_id=%s, pending_keys=%s",
                      approved, confirm_id, list(_pending_confirms.keys()))
         future = _pending_confirms.get(confirm_id)
