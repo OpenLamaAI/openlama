@@ -495,12 +495,18 @@ def update(ollama_only, self_only):
                 console.print(f"  [dim]Install method: {method}[/dim]")
 
                 if method == "uv_tool":
+                    # Run uv in a clean env with new session to avoid file locking
+                    import os as _os
+                    clean_env = _os.environ.copy()
+                    clean_env.pop("VIRTUAL_ENV", None)
+                    clean_env.pop("UV_TOOL_DIR", None)
                     result = subprocess.run(
                         [uv_bin, "tool", "install", f"openlama=={latest_ver}", "--force", "--refresh"],
                         capture_output=True, text=True, timeout=120,
+                        start_new_session=True, env=clean_env,
                     )
                     if result.returncode != 0:
-                        console.print(f"  [yellow]uv failed, trying pip...[/yellow]")
+                        console.print(f"  [yellow]uv failed ({result.stderr.strip()[:100]}), trying pip...[/yellow]")
                         subprocess.run([sys.executable, "-m", "pip", "install", f"openlama=={latest_ver}", "--no-cache-dir"],
                                        capture_output=True, timeout=120)
                 elif method == "pipx":
