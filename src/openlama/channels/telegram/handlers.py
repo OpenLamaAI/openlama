@@ -79,7 +79,7 @@ from openlama.core.agent import chat as agent_chat, handle_tool_calls, PROFILE_Q
 from openlama.core.types import ChatRequest, ChatResponse
 from openlama.core.prompt_builder import is_profile_setup_done, save_prompt_file, generate_system_prompt, build_full_system_prompt
 from openlama.core.context import _estimate_tokens, _estimate_messages_tokens, build_context_bar
-from openlama.tools import format_tools_for_ollama
+from openlama.tools import format_tools_for_ollama, is_dangerous_tool
 from openlama.utils.file_processor import (
     detect_file_type,
     process_audio,
@@ -92,6 +92,61 @@ from openlama.utils.streaming import stream_response_to_message
 from openlama.logger import get_logger
 
 logger = get_logger("telegram.handlers")
+
+# ══════════════════════════════════════════════════════════
+# Dangerous tool confirmation system
+# ══════════════════════════════════════════════════════════
+
+# Pending confirmations: {confirm_id: asyncio.Future}
+_pending_confirms: dict[str, asyncio.Future] = {}
+_CONFIRM_TIMEOUT = 60  # seconds
+
+
+def _make_confirm_id(chat_id: int, tool_name: str) -> str:
+    import time
+    return f"tc:{chat_id}:{tool_name}:{int(time.time() * 1000)}"
+
+
+async def _telegram_confirm(chat_id: int, bot, tool_name: str, summary: str) -> bool:
+    """Send Telegram inline keyboard for dangerous tool confirmation.
+
+    Returns True if user approves, False if denied or timeout.
+    """
+    from openlama.config import get_config_bool
+    if not get_config_bool("tool_confirm_dangerous", True):
+        return True  # Confirmation disabled — auto-approve
+
+    confirm_id = _make_confirm_id(chat_id, tool_name)
+    future: asyncio.Future = asyncio.get_event_loop().create_future()
+    _pending_confirms[confirm_id] = future
+
+    # Truncate summary for display
+    display_summary = summary if len(summary) <= 300 else summary[:300] + "..."
+
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Allow", callback_data=f"tool_ok:{confirm_id}"),
+            InlineKeyboardButton("❌ Deny", callback_data=f"tool_no:{confirm_id}"),
+        ]
+    ])
+
+    await bot.send_message(
+        chat_id=chat_id,
+        text=f"⚠️ <b>Tool confirmation required</b>\n\n"
+             f"<b>{tool_name}</b>\n"
+             f"<code>{display_summary}</code>\n\n"
+             f"Allow execution?",
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
+
+    try:
+        result = await asyncio.wait_for(future, timeout=_CONFIRM_TIMEOUT)
+        return result
+    except asyncio.TimeoutError:
+        return False
+    finally:
+        _pending_confirms.pop(confirm_id, None)
 
 
 def _save_and_clear(uid: int):
@@ -827,9 +882,16 @@ async def _do_chat_inner(
                 except Exception:
                     pass
 
+            # Dangerous tool confirmation callback
+            chat_id = update.effective_chat.id
+            bot = update.get_bot()
+
+            async def _confirm_fn(tool_name: str, summary: str) -> bool:
+                return await _telegram_confirm(chat_id, bot, tool_name, summary)
+
             answer, tool_image_paths, tool_usage = await handle_tool_calls(
                 uid, model, messages_with_assistant, tool_calls, settings, think,
-                tools=tools, on_progress=_on_progress,
+                tools=tools, on_progress=_on_progress, confirm_fn=_confirm_fn,
             )
             prompt_tokens += tool_usage.prompt_tokens
             completion_tokens += tool_usage.completion_tokens
@@ -1797,6 +1859,19 @@ async def on_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     data = q.data or ""
 
     if data == "noop":
+        return
+
+    # ── Tool confirmation callbacks ──
+    if data.startswith("tool_ok:") or data.startswith("tool_no:"):
+        approved = data.startswith("tool_ok:")
+        confirm_id = data.split(":", 1)[1]
+        future = _pending_confirms.get(confirm_id)
+        if future and not future.done():
+            future.set_result(approved)
+            status = "✅ Allowed" if approved else "❌ Denied"
+            await q.edit_message_text(f"{status}: {confirm_id.split(':')[2]}")
+        else:
+            await q.edit_message_text("⏰ Confirmation expired or already handled.")
         return
 
     # ── Login button (no auth required) ──

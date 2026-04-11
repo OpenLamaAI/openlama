@@ -84,6 +84,11 @@ def settings_keyboard(uid: int, model: str) -> InlineKeyboardMarkup:
     stats_label = "📊 Token Stats: ON" if show_stats else "📊 Token Stats: OFF"
     rows.append([InlineKeyboardButton(stats_label, callback_data="toggle:show_token_stats")])
 
+    # Tool confirmation toggle
+    tool_confirm = get_config("tool_confirm_dangerous", "true").lower() in ("true", "1", "yes")
+    confirm_label = "🛡 Tool Confirm: ON" if tool_confirm else "🛡 Tool Confirm: OFF"
+    rows.append([InlineKeyboardButton(confirm_label, callback_data="toggle:tool_confirm_dangerous")])
+
     rows.append([
         InlineKeyboardButton("🔄 Reset", callback_data="set_reset"),
         InlineKeyboardButton("🏠 Menu", callback_data="cmd:menu"),
@@ -233,6 +238,19 @@ async def handle_settings_callback(query, uid: int, data: str, user):
         new_label = "OFF" if current else "ON"
         await query.edit_message_text(
             f"⚙️ <b>Model Settings: {model}</b>\n📊 Token Stats: {new_label}",
+            parse_mode="HTML",
+            reply_markup=settings_keyboard(uid, model),
+        )
+        return
+
+    if data == "toggle:tool_confirm_dangerous":
+        from openlama.config import get_config
+        from openlama.database import set_setting
+        current = get_config("tool_confirm_dangerous", "true").lower() in ("true", "1", "yes")
+        set_setting("tool_confirm_dangerous", "false" if current else "true")
+        new_label = "OFF ⚠️" if current else "ON"
+        await query.edit_message_text(
+            f"⚙️ <b>Model Settings: {model}</b>\n🛡 Tool Confirm: {new_label}",
             parse_mode="HTML",
             reply_markup=settings_keyboard(uid, model),
         )

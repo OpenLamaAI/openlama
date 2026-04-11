@@ -96,6 +96,7 @@ _DEFAULTS = {
     "obsidian_vault": "",
     "code_agent_confirm": "true",
     "google_enabled": "false",
+    "tool_confirm_dangerous": "true",
     "show_token_stats": "true",
     "comfy_start_cmd": "",
     "comfy_auto_stop": "true",

@@ -46,6 +46,7 @@ async def handle_tool_calls(
     think: bool,
     tools: list[dict] | None = None,
     on_progress=None,
+    confirm_fn=None,
 ) -> tuple[str, list[str], TokenUsage]:
     """Multi-turn tool loop with loop detection. Returns (answer, image_paths, usage)."""
     from openlama.core.tool_loop import LoopDetector
@@ -76,7 +77,7 @@ async def handle_tool_calls(
             if on_progress:
                 await on_progress(f"\U0001f527 Running tool... (round {iteration + 1}, {name})")
 
-            result = await execute_tool(name, args, uid)
+            result = await execute_tool(name, args, uid, confirm_fn=confirm_fn)
 
             # Check for tool loop
             loop_warning = detector.record(name, args, result)
@@ -211,7 +212,7 @@ async def _call_with_auto_trim(
     raise last_error or RuntimeError("Chat failed after retries")
 
 
-async def chat(request: ChatRequest, on_progress=None) -> ChatResponse:
+async def chat(request: ChatRequest, on_progress=None, confirm_fn=None) -> ChatResponse:
     """Main chat entry point — channel independent.
 
     Args:
@@ -319,7 +320,7 @@ async def chat(request: ChatRequest, on_progress=None) -> ChatResponse:
 
         content, image_paths, tool_usage = await handle_tool_calls(
             uid, model, messages, tool_calls, settings, think, tools=tools,
-            on_progress=_tool_progress,
+            on_progress=_tool_progress, confirm_fn=confirm_fn,
         )
         usage.prompt_tokens += tool_usage.prompt_tokens
         usage.completion_tokens += tool_usage.completion_tokens

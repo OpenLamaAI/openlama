@@ -523,6 +523,11 @@ async def _cmd_settings(uid: int, args: str):
     table.add_row("seed", str(getattr(ms, "seed", 0)), "Random seed (0 = random)")
     table.add_row("keep_alive", str(ms.keep_alive), "Model keep-alive time")
 
+    # Global settings
+    from openlama.config import get_config
+    tool_confirm = get_config("tool_confirm_dangerous", "true").lower() in ("true", "1", "yes")
+    table.add_row("tool_confirm", "ON" if tool_confirm else "OFF", "Confirm before dangerous tools (shell, code, etc.)")
+
     await aprint(table)
     await aprint(f"  [dim]Use /set <param> <value> to change. E.g., /set temperature 0.8[/dim]\n")
 
@@ -551,6 +556,7 @@ async def _cmd_set(uid: int, args: str):
         "repeat_penalty": {"type": float, "min": 0.5,  "max": 2.0},
         "seed":           {"type": int,   "min": 0,    "max": 999999},
         "keep_alive":     {"type": str},
+        "tool_confirm":   {"type": str, "global": True},
     }
 
     if param not in param_defs:
@@ -559,6 +565,21 @@ async def _cmd_set(uid: int, args: str):
         return
 
     pdef = param_defs[param]
+
+    # Global settings (stored in settings table, not per-model)
+    if pdef.get("global"):
+        from openlama.database import set_setting
+        if param == "tool_confirm":
+            if value.lower() in ("on", "true", "1", "yes"):
+                set_setting("tool_confirm_dangerous", "true")
+                await aprint(f"  [green]🛡 Tool Confirmation: ON[/green]\n")
+            elif value.lower() in ("off", "false", "0", "no"):
+                set_setting("tool_confirm_dangerous", "false")
+                await aprint(f"  [yellow]⚠️ Tool Confirmation: OFF[/yellow]\n")
+            else:
+                await aprint(f"  [red]Invalid value: {value}. Use on/off.[/red]\n")
+        return
+
     from openlama.database import set_model_setting
     try:
         if param == "keep_alive":
@@ -1298,7 +1319,24 @@ async def _process_input(uid: int, user_input: str):
 
     try:
         _status["text"] = "Thinking..."
-        response: ChatResponse = await chat(request, on_progress=_on_progress)
+        async def _cli_confirm(tool_name: str, summary: str) -> bool:
+            """CLI confirmation for dangerous tools."""
+            from openlama.config import get_config_bool
+            if not get_config_bool("tool_confirm_dangerous", True):
+                return True
+            _status["text"] = ""  # Clear spinner
+            async with in_terminal():
+                await aprint(f"\n[yellow]⚠ Tool confirmation: [bold]{tool_name}[/bold][/yellow]")
+                await aprint(f"[dim]{summary}[/dim]")
+                try:
+                    answer = await asyncio.to_thread(
+                        input, "  Allow? (y/N): "
+                    )
+                    return answer.strip().lower() in ("y", "yes")
+                except (EOFError, KeyboardInterrupt):
+                    return False
+
+        response: ChatResponse = await chat(request, on_progress=_on_progress, confirm_fn=_cli_confirm)
         _status["text"] = ""
 
         # Show process log if any tool/retry events occurred
