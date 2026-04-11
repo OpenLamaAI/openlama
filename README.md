@@ -18,6 +18,30 @@
 
 ---
 
+## Table of Contents
+
+- [Why openlama?](#why-openlama)
+- [Features](#features)
+- [Quick Start](#quick-start)
+- [Terminal Chat (TUI)](#terminal-chat-tui)
+- [Telegram Bot](#telegram-bot)
+- [Built-in Tools](#built-in-tools-36)
+- [Google Integration](#google-integration)
+- [Android (Termux) Setup](#android-termux-setup)
+- [Memory System](#memory-system)
+- [Custom Skills](#custom-skills)
+- [MCP Integration](#mcp-integration)
+- [Scheduled Tasks](#scheduled-tasks)
+- [Prompt System](#prompt-system)
+- [Architecture](#architecture)
+- [CLI Reference](#cli-reference)
+- [Configuration](#configuration)
+- [Recommended Models](#recommended-models)
+- [System Requirements](#system-requirements)
+- [Contributing](#contributing)
+
+---
+
 ## Why openlama?
 
 Most AI assistants send your data to cloud servers. openlama runs entirely on your local machine using Ollama, giving you a personal AI agent with full tool access and zero data leakage.
@@ -30,7 +54,7 @@ Optimized for [Gemma 4](https://blog.google/innovation-and-ai/technology/develop
 
 - **100% Local** — No cloud APIs. All processing on your hardware.
 - **Dual Channel** — Telegram bot + terminal TUI with shared conversation context.
-- **22+ Built-in Tools** — Web search, code execution, file I/O, image generation, Git, Claude Code agent, Obsidian, and more.
+- **36+ Built-in Tools** — Web search, code execution, file I/O, image generation, Git, Google Workspace (Gmail, Calendar, Drive, Docs, Sheets), Claude Code agent, and more.
 - **Custom Skills** — Create reusable instruction sets triggered by keywords.
 - **MCP Support** — Connect external tool servers via [Model Context Protocol](https://modelcontextprotocol.io).
 - **Scheduled Tasks** — Cron-based recurring tasks executed by AI.
@@ -64,35 +88,27 @@ openlama setup
 The interactive wizard will:
 
 ```
-  ● Step 1/7 — Ollama
+  ● Step 1/8 — Ollama
   ✓ Ollama is installed
   ✓ Ollama server running (v0.20.3)
 
-  ● Step 2/7 — Models
+  ● Step 2/8 — Models
   ? Select models to download:
     ✓ gemma4:e4b       9.6 GB  [recommended]
       qwen3:8b         5.2 GB  [light]
-      deepseek-r1:8b   5.2 GB  [coding]
     ✓ gemma4:e2b                [installed]
 
-  gemma4:e4b (pulling manifest)  ━━━━━━━━━━━━━━  4.2/9.6 GB  52.3 MB/s  0:01:43
-
-  ● Step 3/7 — Channel
+  ● Step 3/8 — Channel
   ? Enter Telegram bot token (@BotFather): 1234567890:ABC...
   ✓ Connected: @your_bot_name
 
-  ● Step 4/7 — Password
-  ? Set admin password: ********
-
-  ● Step 5/7 — Features
-  ✓ ComfyUI detected: macOS Desktop App
-
-  ● Step 6/7 — Voice Recognition (STT)
-  ✓ faster-whisper is installed
-
-  ● Step 7/7 — Obsidian Notes
-  ✓ obsidian-cli is installed
-  ✓ Vault connected: 13 items found
+  ● Step 4/8 — Password
+  ● Step 5/8 — Features
+  ● Step 6/8 — Voice Recognition (STT)
+  ● Step 7/8 — Obsidian Notes
+  ● Step 8/8 — Google Integration (Optional)
+  ? Enable Google integration? Yes
+  ✓ Connected as user@gmail.com
 
   ╭─────────────────────────────────────────────╮
   │  ✅ Setup complete!                          │
@@ -217,7 +233,7 @@ After `openlama start`, open your bot in Telegram:
 
 ---
 
-## Built-in Tools (22+)
+## Built-in Tools (36+)
 
 | Tool | Description |
 |------|-------------|
@@ -244,13 +260,81 @@ After `openlama start`, open your bot in Telegram:
 | `code_agent` | Claude Code CLI agent for complex coding tasks |
 | `termux_device` | Android device control via Termux:API (Android only) |
 
+<details>
+<summary><b>Google Workspace Tools (14 tools, 164 actions)</b></summary>
+
+| Tool | Actions |
+|------|---------|
+| `google_auth` | OAuth authentication, status, revoke |
+| `google_gmail` | Search, send, reply, labels, drafts, filters, vacation, forwarding, delegates (37 actions) |
+| `google_calendar` | Events, create, update, RSVP, free/busy, conflicts, focus time, out-of-office (15 actions) |
+| `google_drive` | List, search, upload, download, share, comments, shared drives (20 actions) |
+| `google_docs` | Read, create, export, write, find & replace, comments (16 actions) |
+| `google_sheets` | Read/write ranges, create, format, merge, freeze, named ranges, tabs (22 actions) |
+| `google_slides` | Create, export, read slides, speaker notes (9 actions) |
+| `google_contacts` | List, search, create, update, delete contacts (6 actions) |
+| `google_tasks` | Task lists, add/complete/delete tasks (9 actions) |
+| `google_forms` | Create forms, add questions, view responses (8 actions) |
+| `google_keep` | Notes: list, create, search, delete (6 actions) |
+| `google_people` | Profile, directory search, relations (4 actions) |
+| `google_chat` | Spaces, messages, DMs, reactions (8 actions, Workspace) |
+| `google_appscript` | View, create, execute Apps Scripts (4 actions) |
+
+</details>
+
 The AI understands tool requests in any language:
 
 > "check server status" → `shell_command`
 > "search for latest AI news" → `web_search`
-> "summarize tech news every day at 9am" → `cron_manager`
-> "list my notes" → `obsidian`
+> "send an email to john about the meeting" → `google_gmail`
+> "what's on my calendar tomorrow?" → `google_calendar`
 > "check battery level" → `termux_device` (Android)
+
+---
+
+## Google Integration
+
+Connect your Google account to manage Gmail, Calendar, Drive, Docs, Sheets, and more — all from your local AI agent.
+
+### Setup
+
+**1. Create OAuth credentials** at [Google Cloud Console](https://console.cloud.google.com/):
+   - Create a project → Enable APIs (Gmail, Calendar, Drive, Docs, Sheets, etc.)
+   - Create OAuth client ID → select **Desktop app** → download `credentials.json`
+
+**2. Configure** via setup wizard or CLI:
+
+```bash
+# During initial setup (Step 8)
+openlama setup
+
+# Or anytime after
+openlama google auth
+```
+
+**3. Verify:**
+
+```bash
+openlama google status
+```
+
+```
+  Google integration: enabled
+  Credentials: ✓ stored
+  Token: ✓ stored
+  Account: user@gmail.com
+  Status: ✓ valid
+```
+
+### CLI Commands
+
+| Command | Description |
+|---------|-------------|
+| `openlama google auth` | Authenticate with Google (opens browser) |
+| `openlama google status` | Show connection status |
+| `openlama google revoke` | Disconnect Google account |
+
+> **Note:** Initial authentication requires a browser (local GUI). After that, the token auto-refreshes indefinitely. Credentials are encrypted and stored in the local database.
 
 ---
 
@@ -503,6 +587,9 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 
 ## CLI Reference
 
+<details>
+<summary><b>Full command list</b></summary>
+
 | Command | Description |
 |---------|-------------|
 | `openlama setup` | Interactive setup wizard |
@@ -534,11 +621,16 @@ All files are in `~/.config/openlama/prompts/` and can be edited via:
 | `openlama mcp list` | List MCP servers |
 | `openlama mcp add <name> <cmd> [args]` | Add an MCP server |
 | `openlama mcp remove <name>` | Remove an MCP server |
+| `openlama google auth` | Authenticate with Google (opens browser) |
+| `openlama google status` | Show Google connection status |
+| `openlama google revoke` | Disconnect Google account |
 | `openlama tool list` | List all registered tools |
 | `openlama cron list` | List scheduled tasks |
 | `openlama cron delete <id>` | Delete a scheduled task |
 | `openlama logs` | View daemon logs |
 | `openlama --version` | Show version |
+
+</details>
 
 ---
 
@@ -614,6 +706,7 @@ Key settings:
 | `tool_sandbox_path` | `~/sandbox` | Sandbox for code execution |
 | `obsidian_vault` | — | Obsidian vault name (enables obsidian tool) |
 | `stt_enabled` | `auto` | Voice recognition: `true`/`false`/`auto` |
+| `google_enabled` | `false` | Google integration: `true`/`false` |
 
 ---
 

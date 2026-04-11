@@ -18,6 +18,30 @@
 
 ---
 
+## 목차
+
+- [왜 openlama인가?](#왜-openlama인가)
+- [특징](#특징)
+- [빠른 시작](#빠른-시작)
+- [터미널 채팅 (TUI)](#터미널-채팅-tui)
+- [텔레그램 봇](#텔레그램-봇)
+- [내장 도구](#내장-도구-36개)
+- [Google 연동](#google-연동)
+- [Android (Termux) 설치 가이드](#android-termux-설치-가이드)
+- [메모리 시스템](#메모리-시스템)
+- [커스텀 스킬](#커스텀-스킬)
+- [MCP 연동](#mcp-연동)
+- [예약 작업](#예약-작업)
+- [프롬프트 시스템](#프롬프트-시스템)
+- [디렉토리 구조](#디렉토리-구조)
+- [CLI 명령어 전체 목록](#cli-명령어-전체-목록)
+- [설정](#설정)
+- [추천 모델](#추천-모델)
+- [시스템 요구 사항](#시스템-요구-사항)
+- [기여하기](#기여하기)
+
+---
+
 ## 왜 openlama인가?
 
 대부분의 AI 비서는 데이터를 클라우드 서버로 보냅니다. openlama는 Ollama를 사용하여 로컬에서 완전히 실행되며, 도구 접근 권한이 있는 개인 AI 에이전트를 제공합니다. 데이터 유출 제로.
@@ -30,7 +54,7 @@
 
 - **100% 로컬** — 클라우드 API 없음. 모든 처리가 내 하드웨어에서 실행.
 - **듀얼 채널** — 텔레그램 봇 + 터미널 TUI. 대화 컨텍스트 공유.
-- **22개 이상 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git, Claude Code 에이전트, Obsidian 등.
+- **36개 이상 내장 도구** — 웹 검색, 코드 실행, 파일 I/O, 이미지 생성, Git, Google Workspace (Gmail, Calendar, Drive, Docs, Sheets), Claude Code 에이전트 등.
 - **커스텀 스킬** — 키워드에 자동 트리거되는 재사용 가능한 지침 세트.
 - **MCP 지원** — [Model Context Protocol](https://modelcontextprotocol.io)로 외부 도구 서버 연결.
 - **예약 작업** — 크론 기반 반복 작업을 AI가 실행.
@@ -64,35 +88,27 @@ openlama setup
 대화형 마법사가 진행됩니다:
 
 ```
-  ● Step 1/7 — Ollama
+  ● Step 1/8 — Ollama
   ✓ Ollama is installed
   ✓ Ollama server running (v0.20.3)
 
-  ● Step 2/7 — Models
+  ● Step 2/8 — Models
   ? Select models to download:
     ✓ gemma4:e4b       9.6 GB  [recommended]
       qwen3:8b         5.2 GB  [light]
-      deepseek-r1:8b   5.2 GB  [coding]
     ✓ gemma4:e2b                [installed]
 
-  gemma4:e4b (pulling manifest)  ━━━━━━━━━━━━━━  4.2/9.6 GB  52.3 MB/s  0:01:43
-
-  ● Step 3/7 — Channel
+  ● Step 3/8 — Channel
   ? Enter Telegram bot token (@BotFather): 1234567890:ABC...
   ✓ Connected: @your_bot_name
 
-  ● Step 4/7 — Password
-  ? Set admin password: ********
-
-  ● Step 5/7 — Features
-  ✓ ComfyUI detected: macOS Desktop App
-
-  ● Step 6/7 — Voice Recognition (STT)
-  ✓ faster-whisper is installed
-
-  ● Step 7/7 — Obsidian Notes
-  ✓ obsidian-cli is installed
-  ✓ Vault connected: 13 items found
+  ● Step 4/8 — Password
+  ● Step 5/8 — Features
+  ● Step 6/8 — Voice Recognition (STT)
+  ● Step 7/8 — Obsidian Notes
+  ● Step 8/8 — Google Integration (Optional)
+  ? Enable Google integration? Yes
+  ✓ Connected as user@gmail.com
 
   ╭─────────────────────────────────────────────╮
   │  ✅ Setup complete!                          │
@@ -214,7 +230,7 @@ You: 서울 날씨 알려줘
 
 ---
 
-## 내장 도구 (22+개)
+## 내장 도구 (36+개)
 
 | 도구 | 설명 |
 |------|------|
@@ -241,13 +257,81 @@ You: 서울 날씨 알려줘
 | `code_agent` | Claude Code CLI 에이전트 — 복잡한 코딩 작업 수행 |
 | `termux_device` | Android 디바이스 제어 — Termux:API (Android 전용) |
 
+<details>
+<summary><b>Google Workspace 도구 (14개 도구, 164개 액션)</b></summary>
+
+| 도구 | 액션 |
+|------|------|
+| `google_auth` | OAuth 인증, 상태 확인, 연동 해제 |
+| `google_gmail` | 검색, 발송, 답장, 라벨, 임시저장, 필터, 자동응답, 전달, 위임 (37개) |
+| `google_calendar` | 일정 조회/생성/수정, 참석 응답, 빈 시간, 충돌, 집중시간, 부재중 (15개) |
+| `google_drive` | 파일 목록/검색/업로드/다운로드/공유, 댓글, 공유 드라이브 (20개) |
+| `google_docs` | 읽기, 생성, 내보내기, 쓰기, 찾기/바꾸기, 댓글 (16개) |
+| `google_sheets` | 범위 읽기/쓰기, 생성, 서식, 병합, 고정, 명명 범위, 탭 (22개) |
+| `google_slides` | 생성, 내보내기, 슬라이드 읽기, 발표자 노트 (9개) |
+| `google_contacts` | 연락처 목록/검색/생성/수정/삭제 (6개) |
+| `google_tasks` | 작업 목록, 추가/완료/삭제 (9개) |
+| `google_forms` | 설문 생성, 질문 추가, 응답 조회 (8개) |
+| `google_keep` | 메모 목록/생성/검색/삭제 (6개) |
+| `google_people` | 프로필, 디렉토리 검색, 관계 (4개) |
+| `google_chat` | 스페이스, 메시지, DM, 리액션 (8개, Workspace) |
+| `google_appscript` | 스크립트 조회/생성/실행 (4개) |
+
+</details>
+
 AI는 어떤 언어로 요청해도 도구를 사용합니다:
 
 > "서버 상태 확인해줘" → `shell_command`
 > "search for latest AI news" → `web_search`
-> "매일 10시에 뉴스 요약해줘" → `cron_manager`
-> "노트 목록 보여줘" → `obsidian`
+> "john에게 회의 관련 메일 보내줘" → `google_gmail`
+> "내일 일정 알려줘" → `google_calendar`
 > "배터리 확인해줘" → `termux_device` (Android)
+
+---
+
+## Google 연동
+
+Google 계정을 연동하여 Gmail, Calendar, Drive, Docs, Sheets 등을 로컬 AI 에이전트에서 관리합니다.
+
+### 설정 방법
+
+**1. OAuth 인증 정보 생성** — [Google Cloud Console](https://console.cloud.google.com/):
+   - 프로젝트 생성 → API 활성화 (Gmail, Calendar, Drive, Docs, Sheets 등)
+   - OAuth 클라이언트 ID 생성 → **데스크톱 앱** 선택 → `credentials.json` 다운로드
+
+**2. 설정** — 초기 설정 마법사 또는 CLI:
+
+```bash
+# 초기 설정 시 (Step 8)
+openlama setup
+
+# 또는 언제든
+openlama google auth
+```
+
+**3. 확인:**
+
+```bash
+openlama google status
+```
+
+```
+  Google integration: enabled
+  Credentials: ✓ stored
+  Token: ✓ stored
+  Account: user@gmail.com
+  Status: ✓ valid
+```
+
+### CLI 명령어
+
+| 명령어 | 설명 |
+|--------|------|
+| `openlama google auth` | Google 인증 (브라우저 열림) |
+| `openlama google status` | 연동 상태 확인 |
+| `openlama google revoke` | Google 계정 연동 해제 |
+
+> **참고:** 최초 인증 시 브라우저가 필요합니다 (로컬 GUI). 이후에는 토큰이 자동 갱신됩니다. 인증 정보는 암호화되어 로컬 데이터베이스에 저장됩니다.
 
 ---
 
@@ -489,6 +573,9 @@ openlama cron delete 1   # 작업 삭제
 
 ## CLI 명령어 전체 목록
 
+<details>
+<summary><b>전체 명령어 목록</b></summary>
+
 | 명령어 | 설명 |
 |--------|------|
 | `openlama setup` | 대화형 초기 설정 |
@@ -520,11 +607,16 @@ openlama cron delete 1   # 작업 삭제
 | `openlama mcp list` | MCP 서버 목록 |
 | `openlama mcp add <name> <cmd> [args]` | MCP 서버 추가 |
 | `openlama mcp remove <name>` | MCP 서버 제거 |
+| `openlama google auth` | Google 인증 (브라우저 열림) |
+| `openlama google status` | Google 연동 상태 |
+| `openlama google revoke` | Google 계정 연동 해제 |
 | `openlama tool list` | 등록된 도구 목록 |
 | `openlama cron list` | 예약 작업 목록 |
 | `openlama cron delete <id>` | 예약 작업 삭제 |
 | `openlama logs` | 데몬 로그 |
 | `openlama --version` | 버전 확인 |
+
+</details>
 
 ---
 
@@ -600,6 +692,7 @@ export OPENLAMA_DATA_DIR=/custom/path
 | `tool_sandbox_path` | `~/sandbox` | 코드 실행 샌드박스 |
 | `obsidian_vault` | — | 옵시디언 볼트 이름 (설정 시 도구 활성화) |
 | `stt_enabled` | `auto` | 음성 인식: `true`/`false`/`auto` |
+| `google_enabled` | `false` | Google 연동: `true`/`false` |
 
 ---
 
