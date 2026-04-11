@@ -494,28 +494,44 @@ def update(ollama_only, self_only):
 
                 console.print(f"  [dim]Install method: {method}[/dim]")
 
+                updated = False
                 if method == "uv_tool":
-                    # Use shell execution to avoid process locking issues
+                    # Always use --force --refresh to bypass uv's aggressive caching.
+                    # Don't pin version — let uv resolve latest from refreshed index.
                     result = subprocess.run(
-                        f"{uv_bin} tool install 'openlama=={latest_ver}' --force --refresh",
+                        f"{uv_bin} tool install openlama --force --refresh",
                         capture_output=True, text=True, timeout=120, shell=True,
                     )
-                    if result.returncode != 0:
+                    if result.returncode == 0:
+                        updated = True
+                    else:
                         console.print(f"  [yellow]uv failed ({result.stderr.strip()[:100]}), trying pip...[/yellow]")
-                        subprocess.run([sys.executable, "-m", "pip", "install", f"openlama=={latest_ver}", "--no-cache-dir"],
-                                       capture_output=True, timeout=120)
+                        r2 = subprocess.run(
+                            [sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
+                            capture_output=True, timeout=120,
+                        )
+                        if r2.returncode == 0:
+                            updated = True
                 elif method == "pipx":
-                    subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
+                    r2 = subprocess.run([pipx_bin, "upgrade", "openlama"], capture_output=True, text=True, timeout=120)
+                    if r2.returncode == 0:
+                        updated = True
                 else:
-                    subprocess.run([sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
-                                   capture_output=True, timeout=120)
+                    r2 = subprocess.run(
+                        [sys.executable, "-m", "pip", "install", "--upgrade", "openlama", "--no-cache-dir"],
+                        capture_output=True, timeout=120,
+                    )
+                    if r2.returncode == 0:
+                        updated = True
 
                 ver_out = subprocess.run(["openlama", "--version"], capture_output=True, text=True, timeout=10)
                 new_ver = ver_out.stdout.strip().split()[-1] if ver_out.returncode == 0 else "?"
                 if new_ver != old_ver:
                     console.print(f"  [green]Updated: v{old_ver} -> v{new_ver}[/green]")
+                elif updated:
+                    console.print(f"  [green]Reinstalled v{new_ver}[/green]")
                 else:
-                    console.print(f"  [yellow]Version unchanged (v{new_ver}). Try: uv tool install openlama --force --refresh[/yellow]")
+                    console.print(f"  [yellow]Update failed. Try manually: uv tool install openlama --force --refresh[/yellow]")
             else:
                 console.print(f"  Could not check PyPI. Try: uv tool install openlama --force --refresh")
         except Exception as e:
