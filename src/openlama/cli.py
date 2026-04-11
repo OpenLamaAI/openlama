@@ -540,8 +540,6 @@ def update(ollama_only, self_only):
                     console.print(f"  [green]Updated: v{old_ver} → v{new_ver}[/green]")
                 else:
                     console.print(f"  [yellow]Update failed. Try: uv tool install openlama --force --refresh[/yellow]")
-            else:
-                console.print(f"  Could not check PyPI. Try: uv tool install openlama --force --refresh")
         except Exception as e:
             console.print(f"  [red]Failed: {e}[/red]")
 
