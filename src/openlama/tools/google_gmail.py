@@ -76,6 +76,8 @@ async def _search(args: dict) -> str:
 
 async def _get(args: dict) -> str:
     message_id = args.get("message_id", "")
+    if not message_id:
+        return "Error: message_id is required."
 
     def _run():
         msg = _svc().users().messages().get(userId="me", id=message_id, format="full").execute()
@@ -86,6 +88,8 @@ async def _get(args: dict) -> str:
 
 async def _get_thread(args: dict) -> str:
     thread_id = args.get("thread_id", "")
+    if not thread_id:
+        return "Error: thread_id is required."
 
     def _run():
         thread = _svc().users().threads().get(userId="me", id=thread_id, format="full").execute()
@@ -105,7 +109,13 @@ async def _send(args: dict) -> str:
     html = args.get("html", False)
     reply_to = args.get("reply_to_message_id", "")
 
+    if not to:
+        return "Error: 'to' (recipient email) is required."
+    if not body:
+        return "Error: 'body' is required."
+
     def _run():
+        svc = _svc()
         if html:
             msg = MIMEMultipart("alternative")
             msg.attach(MIMEText(body, "html"))
@@ -120,11 +130,18 @@ async def _send(args: dict) -> str:
 
         send_body = {"raw": base64.urlsafe_b64encode(msg.as_bytes()).decode()}
         if reply_to:
-            send_body["threadId"] = _svc().users().messages().get(
-                userId="me", id=reply_to, format="minimal"
-            ).execute().get("threadId", "")
+            # Fetch original message for threadId and proper RFC 2822 threading
+            orig = svc.users().messages().get(userId="me", id=reply_to, format="metadata").execute()
+            send_body["threadId"] = orig.get("threadId", "")
+            h = _headers_dict(orig)
+            rfc_msg_id = h.get("Message-ID", h.get("Message-Id", ""))
+            if rfc_msg_id:
+                msg["In-Reply-To"] = rfc_msg_id
+                msg["References"] = rfc_msg_id
+            # Re-encode after adding headers
+            send_body["raw"] = base64.urlsafe_b64encode(msg.as_bytes()).decode()
 
-        result = _svc().users().messages().send(userId="me", body=send_body).execute()
+        result = svc.users().messages().send(userId="me", body=send_body).execute()
         return f"Email sent. Message ID: {result['id']}"
 
     return await asyncio.to_thread(_run)
@@ -134,6 +151,11 @@ async def _reply(args: dict) -> str:
     message_id = args.get("message_id", "")
     body = args.get("body", "")
     quote = args.get("quote", True)
+
+    if not message_id:
+        return "Error: message_id is required."
+    if not body:
+        return "Error: body is required."
 
     def _run():
         svc = _svc()
@@ -145,6 +167,10 @@ async def _reply(args: dict) -> str:
             subject = f"Re: {subject}"
         thread_id = orig.get("threadId", "")
 
+        # RFC 2822: In-Reply-To and References must use the original Message-ID header,
+        # not the Gmail internal ID. This ensures proper threading in email clients.
+        rfc_message_id = h.get("Message-ID", h.get("Message-Id", ""))
+
         text = body
         if quote:
             orig_body = _extract_body(orig.get("payload", {}))
@@ -155,8 +181,9 @@ async def _reply(args: dict) -> str:
         msg = MIMEText(text)
         msg["to"] = to
         msg["subject"] = subject
-        msg["In-Reply-To"] = message_id
-        msg["References"] = message_id
+        if rfc_message_id:
+            msg["In-Reply-To"] = rfc_message_id
+            msg["References"] = rfc_message_id
 
         send_body = {
             "raw": base64.urlsafe_b64encode(msg.as_bytes()).decode(),
@@ -178,22 +205,23 @@ async def _archive(args: dict) -> str:
         if query:
             resp = svc.users().messages().list(userId="me", q=query, maxResults=int(args.get("max_results", 50))).execute()
             ids.extend(m["id"] for m in resp.get("messages", []))
-        count = 0
-        for mid in ids:
-            svc.users().messages().modify(userId="me", id=mid, body={"removeLabelIds": ["INBOX"]}).execute()
-            count += 1
-        return f"Archived {count} message(s)."
+        if not ids:
+            return "No messages to archive. Provide message_ids or a search query."
+        # Use batchModify for efficiency
+        svc.users().messages().batchModify(userId="me", body={"ids": ids, "removeLabelIds": ["INBOX"]}).execute()
+        return f"Archived {len(ids)} message(s)."
 
     return await asyncio.to_thread(_run)
 
 
 async def _mark_read(args: dict) -> str:
     message_ids = args.get("message_ids", [])
+    if not message_ids:
+        return "Error: message_ids is required (list of message IDs)."
 
     def _run():
         svc = _svc()
-        for mid in message_ids:
-            svc.users().messages().modify(userId="me", id=mid, body={"removeLabelIds": ["UNREAD"]}).execute()
+        svc.users().messages().batchModify(userId="me", body={"ids": message_ids, "removeLabelIds": ["UNREAD"]}).execute()
         return f"Marked {len(message_ids)} message(s) as read."
 
     return await asyncio.to_thread(_run)
@@ -201,11 +229,12 @@ async def _mark_read(args: dict) -> str:
 
 async def _mark_unread(args: dict) -> str:
     message_ids = args.get("message_ids", [])
+    if not message_ids:
+        return "Error: message_ids is required (list of message IDs)."
 
     def _run():
         svc = _svc()
-        for mid in message_ids:
-            svc.users().messages().modify(userId="me", id=mid, body={"addLabelIds": ["UNREAD"]}).execute()
+        svc.users().messages().batchModify(userId="me", body={"ids": message_ids, "addLabelIds": ["UNREAD"]}).execute()
         return f"Marked {len(message_ids)} message(s) as unread."
 
     return await asyncio.to_thread(_run)
@@ -213,6 +242,8 @@ async def _mark_unread(args: dict) -> str:
 
 async def _trash(args: dict) -> str:
     message_ids = args.get("message_ids", [])
+    if not message_ids:
+        return "Error: message_ids is required (list of message IDs)."
 
     def _run():
         svc = _svc()
@@ -405,6 +436,11 @@ async def _attachment(args: dict) -> str:
     attachment_id = args.get("attachment_id", "")
     filename = args.get("filename", "attachment")
 
+    if not message_id:
+        return "Error: message_id is required."
+    if not attachment_id:
+        return "Error: attachment_id is required."
+
     def _run():
         att = _svc().users().messages().attachments().get(userId="me", messageId=message_id, id=attachment_id).execute()
         data = base64.urlsafe_b64decode(att["data"])
@@ -448,6 +484,8 @@ async def _labels_rename(args: dict) -> str:
 
 async def _batch_delete(args: dict) -> str:
     message_ids = args.get("message_ids", [])
+    if not message_ids:
+        return "Error: message_ids is required (list of message IDs)."
 
     def _run():
         _svc().users().messages().batchDelete(userId="me", body={"ids": message_ids}).execute()
@@ -517,10 +555,9 @@ async def _delegates_remove(args: dict) -> str:
 
 async def _url(args: dict) -> str:
     thread_id = args.get("thread_id", "")
-
-    def _run():
-        return f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
-    return await asyncio.to_thread(_run)
+    if not thread_id:
+        return "Error: thread_id is required."
+    return f"https://mail.google.com/mail/u/0/#inbox/{thread_id}"
 
 
 async def _batch_modify(args: dict) -> str:
