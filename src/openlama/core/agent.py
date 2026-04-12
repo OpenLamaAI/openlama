@@ -1,25 +1,66 @@
 """Channel-independent chat engine."""
 from __future__ import annotations
 
+import asyncio
 import base64
 import json
 import re
 
 from openlama.core.types import ChatRequest, ChatResponse, TokenUsage
-from openlama.core.context import maybe_compress, _estimate_messages_tokens, build_context_bar
+from openlama.core.context import (
+    maybe_compress, _estimate_messages_tokens, build_context_bar,
+    enforce_turn_limit, truncate_tool_result, validate_token_budget,
+)
 from openlama.core.prompt_builder import build_full_system_prompt, is_profile_setup_done
 from openlama.database import (
     get_user, get_model_settings, load_context, save_context,
 )
 from openlama.ollama_client import (
     chat_with_ollama_full, ensure_ollama_running,
-    model_supports_thinking,
+    model_supports_thinking, list_models,
 )
 from openlama.tools import execute_tool, format_tools_for_ollama
-from openlama.config import get_config_int
-from openlama.logger import get_logger
+from openlama.tools.registry import is_dangerous_tool
+from openlama.config import get_config_int, get_config_bool, DEFAULT_MODEL_PARAMS
+from openlama.logger import get_logger, set_request_id
 
 logger = get_logger("agent")
+
+def _select_tools_for_request(text: str, all_tools: list[dict]) -> list[dict]:
+    """Prioritize tools by request type — no extra LLM call (lightweight alternative to multi-agent)."""
+    text_lower = text.lower()
+
+    if any(kw in text_lower for kw in ["검색", "search", "찾아", "find", "뉴스", "news"]):
+        priority = {"web_search", "url_fetch", "memory"}
+    elif any(kw in text_lower for kw in ["코드", "code", "구현", "implement", "버그", "bug", "실행", "execute"]):
+        priority = {"code_execute", "file_read", "file_write", "shell_command", "git"}
+    elif any(kw in text_lower for kw in ["분석", "analyze", "비교", "compare", "계산", "calculate"]):
+        priority = {"calculator", "file_read", "web_search", "memory"}
+    elif any(kw in text_lower for kw in ["일정", "cron", "스케줄", "schedule", "알림", "remind"]):
+        priority = {"cron_manager", "get_datetime", "memory"}
+    elif any(kw in text_lower for kw in ["이미지", "image", "그림", "사진", "그려", "draw"]):
+        priority = {"image_generate", "image_edit", "file_read"}
+    else:
+        return all_tools  # no filtering for general requests
+
+    # Priority tools first, then the rest (model can still use any tool)
+    return sorted(all_tools, key=lambda t: t["function"]["name"] not in priority)
+
+
+def _infer_task_temperature(text: str) -> float | None:
+    """Infer optimal temperature from request type. Returns None to keep user setting."""
+    text_lower = text.lower()
+    # Precision tasks → low temperature
+    if any(kw in text_lower for kw in ["계산", "변환", "확인", "calculate", "convert", "check", "translate"]):
+        return 0.3
+    # Code tasks → medium temperature
+    if any(kw in text_lower for kw in ["코드", "구현", "code", "implement", "fix", "debug", "버그"]):
+        return 0.5
+    # Creative tasks → higher temperature
+    if any(kw in text_lower for kw in ["작성", "생성", "write", "create", "suggest", "idea", "아이디어"]):
+        return 0.8
+    return None
+
 
 PROFILE_QUESTIONS = {
     "users": (
@@ -63,6 +104,9 @@ async def handle_tool_calls(
 
         round_tool_names = []
         loop_critical = False
+
+        # Parse all tool calls and separate safe (parallel) from dangerous (sequential)
+        parsed_calls: list[tuple[dict, str, dict]] = []  # (tc, name, args)
         for tc in pending:
             fn = tc.get("function", {})
             name = fn.get("name", "unknown")
@@ -70,14 +114,49 @@ async def handle_tool_calls(
             if isinstance(args, str):
                 try:
                     args = json.loads(args)
-                except Exception:
-                    args = {}
+                except json.JSONDecodeError as e:
+                    logger.warning("Tool %s args parse failed: %s, raw=%s", name, e, args[:200])
+                    result = f"Error: Invalid tool arguments - {e}. Please retry with valid JSON."
+                    messages.append({"role": "assistant", "content": "", "tool_calls": [tc]})
+                    messages.append({"role": "tool", "content": result})
+                    continue
+            parsed_calls.append((tc, name, args))
 
-            round_tool_names.append(name)
+        # Split into safe (parallelizable) and dangerous (sequential) tools
+        safe_calls = [(tc, n, a) for tc, n, a in parsed_calls if not is_dangerous_tool(n)]
+        dangerous_calls = [(tc, n, a) for tc, n, a in parsed_calls if is_dangerous_tool(n)]
+
+        async def _run_one_tool(tc, name, args):
+            return tc, name, args, await execute_tool(name, args, uid, confirm_fn=confirm_fn)
+
+        # Run safe tools in parallel
+        tool_results: list[tuple[dict, str, dict, str]] = []
+        if safe_calls:
+            if on_progress:
+                names = ", ".join(n for _, n, _ in safe_calls)
+                await on_progress(f"\U0001f527 Running {len(safe_calls)} tools in parallel (round {iteration + 1}: {names})")
+            parallel_results = await asyncio.gather(
+                *[_run_one_tool(tc, n, a) for tc, n, a in safe_calls],
+                return_exceptions=True,
+            )
+            for i, r in enumerate(parallel_results):
+                if isinstance(r, Exception):
+                    tc, n, a = safe_calls[i]
+                    tool_results.append((tc, n, a, f"Tool execution error: {r}"))
+                else:
+                    tool_results.append(r)
+
+        # Run dangerous tools sequentially (need confirmation gate)
+        for tc, name, args in dangerous_calls:
             if on_progress:
                 await on_progress(f"\U0001f527 Running tool... (round {iteration + 1}, {name})")
-
             result = await execute_tool(name, args, uid, confirm_fn=confirm_fn)
+            tool_results.append((tc, name, args, result))
+
+        # Process all results in original order
+        for tc, name, args, result in tool_results:
+            result = truncate_tool_result(str(result))
+            round_tool_names.append(name)
 
             # Check for tool loop
             loop_warning = detector.record(name, args, result)
@@ -158,10 +237,16 @@ async def _call_with_auto_trim(
             last_error = e
             err_str = str(e).lower()
 
-            # Only retry on context-related 400 errors
+            # Detect context-related errors that can be resolved by trimming
             is_context_error = "400" in str(e) and any(
                 kw in err_str for kw in ("context", "too long", "exceed", "token", "length")
             )
+
+            # ReadTimeout with large context is likely context-too-large
+            is_timeout = "timeout" in err_str or "readtimeout" in err_str
+            if is_timeout and len(messages) > 4:
+                logger.warning("ReadTimeout with %d messages — treating as context overflow", len(messages))
+                is_context_error = True
 
             if not is_context_error and "400" in str(e):
                 # 400 but not context-related — might be malformed request.
@@ -197,7 +282,7 @@ async def _call_with_auto_trim(
 
             if len(context_msgs) <= 2:
                 messages = [system_msg, user_msg]
-                save_context(uid, [])
+                await asyncio.to_thread(save_context, uid, [])
                 continue
 
             half = max(2, len(context_msgs) // 2)
@@ -207,7 +292,7 @@ async def _call_with_auto_trim(
             keep_turns = len(context_msgs) // 2
             if len(ctx_items) > keep_turns:
                 ctx_items = ctx_items[-keep_turns:] if keep_turns > 0 else []
-                save_context(uid, ctx_items)
+                await asyncio.to_thread(save_context, uid, ctx_items)
 
     raise last_error or RuntimeError("Chat failed after retries")
 
@@ -229,7 +314,9 @@ async def chat(request: ChatRequest, on_progress=None, confirm_fn=None) -> ChatR
                 pass
 
     uid = request.user_id
-    user = get_user(uid)
+    req_id = set_request_id()
+    logger.info("chat request from uid=%d [%s]", uid, req_id)
+    user = await asyncio.to_thread(get_user, uid)
     model = user.selected_model
     if not model:
         return ChatResponse(content="No model selected. Please select a model with /models.")
@@ -238,14 +325,35 @@ async def chat(request: ChatRequest, on_progress=None, confirm_fn=None) -> ChatR
     if not ok:
         return ChatResponse(content=f"Ollama connection failed: {msg}")
 
-    settings = get_model_settings(uid, model)
+    # Model fallback: verify model is available, try alternatives if not
+    try:
+        available_models = await list_models()
+    except Exception:
+        available_models = []
+    if available_models and model not in available_models:
+        fallback = available_models[0] if available_models else None
+        if fallback:
+            logger.warning("Model %s not available, falling back to %s", model, fallback)
+            await _notify("retry", f"Model {model} not available, using {fallback}")
+            model = fallback
+        else:
+            return ChatResponse(content=f"Model {model} is not available and no fallback found.")
+
+    settings = await asyncio.to_thread(get_model_settings, uid, model)
     think = bool(user.think_mode) and await model_supports_thinking(model)
+
+    # Dynamic temperature: auto-adjust if user hasn't customized
+    if settings.temperature == DEFAULT_MODEL_PARAMS["temperature"]:
+        inferred = _infer_task_temperature(request.text)
+        if inferred is not None:
+            settings.temperature = inferred
+            logger.debug("Dynamic temperature: %.1f for request", inferred)
 
     # Build system prompt (includes date/time automatically, mode based on num_ctx)
     system_prompt = build_full_system_prompt(num_ctx=settings.num_ctx)
 
     # Load context
-    ctx_items = load_context(uid)
+    ctx_items = await asyncio.to_thread(load_context, uid)
     ctx_items, summary = await maybe_compress(
         uid, model, ctx_items,
         num_ctx=settings.num_ctx,
@@ -269,8 +377,30 @@ async def chat(request: ChatRequest, on_progress=None, confirm_fn=None) -> ChatR
         user_msg["images"] = [base64.b64encode(img).decode() for img in request.images]
     messages.append(user_msg)
 
-    # Get tools
+    # Get tools — prioritize by request type (lightweight alternative to multi-agent)
     tools = format_tools_for_ollama(admin=True)
+    tools = _select_tools_for_request(request.text, tools)
+
+    # Multi-agent delegation (opt-in, for complex requests only)
+    min_text_len = get_config_int("delegation_min_text_length", 50)
+    if get_config_bool("multi_agent_enabled", False) and len(request.text) > min_text_len:
+        try:
+            from openlama.core.multi_agent import should_delegate, orchestrate
+            plan = await should_delegate(request.text, model)
+            if plan.needs_delegation:
+                logger.info("Multi-agent: delegating to %d workers", len(plan.tasks))
+                result = await orchestrate(plan, model, uid, system_prompt, on_progress=_notify)
+                ctx_items.append({"u": request.text[:10000], "a": result[:10000]})
+                ctx_items = enforce_turn_limit(ctx_items)
+                await asyncio.to_thread(save_context, uid, ctx_items)
+                context_bar = build_context_bar(0, settings.num_ctx, len(ctx_items))
+                return ChatResponse(content=result, context_bar=context_bar)
+        except Exception as e:
+            logger.warning("Multi-agent delegation failed, falling back to single agent: %s", e)
+            # Fall through to single-agent flow
+
+    # Pre-send token budget validation — trim before hitting API
+    messages = validate_token_budget(messages, settings.num_ctx, settings.num_predict)
 
     # Call model — auto-trim context on overflow (400 error)
     await _notify("thinking", "Reasoning...")
@@ -331,7 +461,8 @@ async def chat(request: ChatRequest, on_progress=None, confirm_fn=None) -> ChatR
     answer = content.strip() if content else ""
     ctx_entry = {"u": request.text[:10000], "a": answer[:10000]}
     ctx_items.append(ctx_entry)
-    save_context(uid, ctx_items)
+    ctx_items = enforce_turn_limit(ctx_items)
+    await asyncio.to_thread(save_context, uid, ctx_items)
 
     # Build context bar using Ollama's actual token counts
     base_prompt = resp.get("prompt_tokens", 0)

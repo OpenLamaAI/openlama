@@ -1,11 +1,12 @@
 """Context management — load, save, compress."""
 from __future__ import annotations
 
+import asyncio
 import re
 
 from openlama.database import load_context, save_context, clear_context, get_model_settings
 from openlama.ollama_client import summarize_context
-from openlama.config import get_config_float
+from openlama.config import get_config_float, get_config_int
 from openlama.logger import get_logger
 
 logger = get_logger("context")
@@ -65,6 +66,61 @@ def set_compress_notify(fn):
     _compress_notify = fn
 
 
+def truncate_tool_result(result: str, max_size: int | None = None) -> str:
+    """Truncate tool result to prevent context bloat, preserving start and end."""
+    if max_size is None:
+        max_size = get_config_int("max_tool_result_size", 3000)
+    if len(result) <= max_size:
+        return result
+    half = max_size // 2 - 50
+    truncated = len(result) - max_size
+    return (
+        result[:half]
+        + f"\n\n... [{truncated} chars truncated] ...\n\n"
+        + result[-half:]
+    )
+
+
+def validate_token_budget(messages: list[dict], num_ctx: int, num_predict: int = 2048) -> list[dict]:
+    """Trim context messages if estimated tokens exceed budget before sending to API."""
+    # Estimate total tokens from all messages
+    total_text = "".join(m.get("content", "") for m in messages)
+    total = _estimate_tokens(total_text)
+
+    # Reserve tokens for model output, then apply safety margin
+    available = max(num_ctx - num_predict, num_ctx // 2)  # guard against num_predict > num_ctx
+    budget = int(available * 0.85)
+
+    if total <= budget:
+        return messages
+
+    # Keep system messages and trim oldest context
+    original_count = len(messages)
+    system_msgs = [m for m in messages if m["role"] == "system"]
+    other_msgs = [m for m in messages if m["role"] != "system"]
+
+    while total > budget and len(other_msgs) > 2:
+        other_msgs.pop(0)
+        total_text = "".join(m.get("content", "") for m in system_msgs + other_msgs)
+        total = _estimate_tokens(total_text)
+
+    result = system_msgs + other_msgs
+    if len(result) < original_count:
+        logger.info("Pre-send trim: %d→%d messages (budget=%d tokens)", original_count, len(result), budget)
+    return result
+
+
+def enforce_turn_limit(ctx_items: list[dict], max_turns: int | None = None) -> list[dict]:
+    """Remove oldest turns to enforce maximum turn count."""
+    if max_turns is None:
+        max_turns = get_config_int("max_context_turns", 100)
+    if len(ctx_items) > max_turns:
+        trimmed = len(ctx_items) - max_turns
+        logger.info("Trimming %d oldest turns (limit=%d)", trimmed, max_turns)
+        return ctx_items[-max_turns:]
+    return ctx_items
+
+
 async def maybe_compress(
     uid: int, model: str, ctx_items: list[dict],
     num_ctx: int = 8192, system_prompt: str = "", user_text: str = "",
@@ -98,7 +154,11 @@ async def maybe_compress(
             pass
 
     try:
-        summary = await summarize_context(model, old_text)
+        compress_timeout = get_config_int("context_compress_timeout", 30)
+        summary = await asyncio.wait_for(
+            summarize_context(model, old_text),
+            timeout=compress_timeout,
+        )
         logger.info("compressed %d turns → summary (%d chars), keeping %d recent", len(old_items), len(summary), len(recent_items))
 
         # Auto-save compressed content to daily memory
@@ -115,6 +175,14 @@ async def maybe_compress(
                 pass
 
         return recent_items, summary
+    except asyncio.TimeoutError:
+        logger.warning("Context compression timed out after %ds, keeping original", compress_timeout)
+        if _compress_notify:
+            try:
+                await _compress_notify("failed")
+            except Exception:
+                pass
+        return ctx_items, ""
     except Exception as e:
         logger.error("summarize failed: %s", e)
         if _compress_notify:

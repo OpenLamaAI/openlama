@@ -68,9 +68,27 @@ def get_prompt_mode(num_ctx: int) -> str:
         return "minimal"
 
 
-def _build_tool_section() -> str:
-    """Build the tools section with all registered tools + MCP tools."""
+def _build_tool_section(names_only: bool = False) -> str:
+    """Build the tools section with all registered tools + MCP tools.
+
+    Args:
+        names_only: If True, only list tool names (descriptions in JSON Schema).
+            Saves ~400 tokens when model receives full tool schemas via tools param.
+    """
     tools = get_all_tools()
+    if names_only:
+        tool_names = ", ".join(t.name for t in tools)
+        # MCP tools
+        try:
+            from openlama.core.mcp_client import get_all_mcp_tools
+            mcp_tools = get_all_mcp_tools()
+            if mcp_tools:
+                mcp_names = ", ".join(f"mcp_{t['server']}_{t['name']}" for t in mcp_tools)
+                tool_names += f", {mcp_names}"
+        except Exception:
+            pass
+        return f"Available tools: {tool_names}\nUse tools via function calling."
+
     lines = []
     for t in tools:
         lines.append(f"- {t.name}: {t.description[:80]}")
@@ -125,6 +143,15 @@ def _build_skills_section_lazy() -> str:
 
 # ── Execution Bias (shared across all modes — CRITICAL for tool usage) ──
 
+_COT_INSTRUCTION = """## Reasoning
+For complex questions requiring analysis, comparison, or multi-step reasoning:
+1. Think through the problem step by step
+2. Consider what tools or information you need
+3. Act on your reasoning immediately
+
+For simple factual questions or direct tool calls, act without lengthy reasoning."""
+
+
 _EXECUTION_BIAS = """## Execution Bias — ACT, do not just plan
 1. If the user asks you to do something and a tool can do it, CALL THE TOOL in the same turn. Do not just describe what you will do.
 2. WRONG: "검색해드릴게요" / "I'll search for you" → CORRECT: immediately call web_search.
@@ -138,7 +165,7 @@ _EXECUTION_BIAS = """## Execution Bias — ACT, do not just plan
 
 def _generate_full() -> str:
     """Full system prompt — all sections. For models with >= 32K context."""
-    tool_section = _build_tool_section()
+    tool_section = _build_tool_section(names_only=True)
     skills_section = _build_skills_section_lazy()
     cron_section = _build_cron_section()
 
@@ -161,6 +188,8 @@ Understand any language; use tools directly without pre-checks.
 11. When the user criticizes you, verify the facts first before responding. Do not default to apologizing.
 
 {_EXECUTION_BIAS}
+
+{_COT_INSTRUCTION}
 
 ## Tools
 {tool_section}
@@ -238,6 +267,8 @@ Understand any language; use tools directly without pre-checks.
 7. Respond based on FACTS only. If you don't know, say "I don't know."
 
 {_EXECUTION_BIAS}
+
+{_COT_INSTRUCTION}
 
 ## Memory (memory tool)
 Long-term: save/list/search/delete (MEMORY.md). Daily: list_dates/read_daily/search_daily (memories/YYYY-MM-DD.md).

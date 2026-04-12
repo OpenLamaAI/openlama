@@ -1,9 +1,22 @@
 """Tool: file_write – write content to a file on the server."""
 
+import asyncio
 from pathlib import Path
 
 from openlama.tools.registry import register_tool
 from openlama.utils.sandbox import is_safe_path
+
+
+def _write_file_sync(path: str, content: str, mode: str) -> str:
+    """Synchronous file write — runs in thread pool to avoid blocking event loop."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    if mode == "append":
+        with open(p, "a", encoding="utf-8") as f:
+            f.write(content)
+    else:
+        p.write_text(content, encoding="utf-8")
+    return f"File saved: {path} ({len(content)} chars)"
 
 
 async def _execute(args: dict) -> str:
@@ -16,16 +29,8 @@ async def _execute(args: dict) -> str:
     if not is_safe_path(path):
         return f"Access denied for path: {path}"
 
-    p = Path(path)
     try:
-        p.parent.mkdir(parents=True, exist_ok=True)
-        if mode == "append":
-            with open(p, "a", encoding="utf-8") as f:
-                f.write(content)
-        else:
-            p.write_text(content, encoding="utf-8")
-
-        return f"File saved: {path} ({len(content)} chars)"
+        return await asyncio.to_thread(_write_file_sync, path, content, mode)
     except Exception as e:
         return f"File write error: {e}"
 
