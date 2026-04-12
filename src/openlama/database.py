@@ -199,11 +199,20 @@ def get_user(uid: int) -> UserState:
     )
 
 
+_USER_ALLOWED_FIELDS = frozenset({
+    "state", "selected_model", "auth_until", "system_prompt",
+    "think_mode", "login_fail_count", "login_lock_until",
+})
+
+
 def update_user(uid: int, **kwargs):
     if not kwargs:
         return
-    keys = list(kwargs.keys())
-    vals = [kwargs[k] for k in keys]
+    filtered = {k: v for k, v in kwargs.items() if k in _USER_ALLOWED_FIELDS}
+    if not filtered:
+        return
+    keys = list(filtered.keys())
+    vals = [filtered[k] for k in keys]
     sets = ", ".join([f"{k}=?" for k in keys] + ["updated_at=strftime('%s','now')"])
     with db_conn() as conn:
         conn.execute(f"UPDATE users SET {sets} WHERE telegram_id=?", (*vals, uid))
@@ -288,7 +297,15 @@ def get_model_settings(uid: int, model: str = "") -> ModelSettings:
     )
 
 
+_MODEL_SETTING_ALLOWED_FIELDS = frozenset({
+    "temperature", "top_p", "top_k", "num_ctx", "num_predict",
+    "repeat_penalty", "seed", "keep_alive",
+})
+
+
 def set_model_setting(uid: int, model: str, key: str, value: Any):
+    if key not in _MODEL_SETTING_ALLOWED_FIELDS:
+        return
     with db_conn() as conn:
         conn.execute(
             f"""INSERT INTO user_model_settings(user_id, model, {key}, updated_at)
@@ -388,11 +405,20 @@ def delete_cron_job(job_id: int) -> bool:
     return cur.rowcount > 0
 
 
+_CRON_ALLOWED_FIELDS = frozenset({
+    "cron_expr", "task", "channel", "chat_id", "enabled",
+    "last_run", "next_run",
+})
+
+
 def update_cron_job(job_id: int, **kwargs):
     if not kwargs:
         return
-    sets = ", ".join(f"{k}=?" for k in kwargs)
-    vals = list(kwargs.values()) + [job_id]
+    filtered = {k: v for k, v in kwargs.items() if k in _CRON_ALLOWED_FIELDS}
+    if not filtered:
+        return
+    sets = ", ".join(f"{k}=?" for k in filtered)
+    vals = list(filtered.values()) + [job_id]
     with db_conn() as conn:
         conn.execute(f"UPDATE cron_jobs SET {sets} WHERE id=?", vals)
 

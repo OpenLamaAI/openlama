@@ -1,6 +1,7 @@
 """Cron manager tool — create, list, delete, enable/disable scheduled tasks."""
 from __future__ import annotations
 
+import contextvars
 import datetime
 import time
 
@@ -11,16 +12,15 @@ from openlama.database import (
 from openlama.core.scheduler import compute_next_run, validate_cron_expr, execute_job
 
 
-# Current chat context — set by channel handlers before tool execution
-_current_chat_id: int = 0
-_current_user_id: int = 0
+# Current chat context — isolated per async task via contextvars (4.8 concurrency fix)
+_current_chat_id: contextvars.ContextVar[int] = contextvars.ContextVar("cron_chat_id", default=0)
+_current_user_id: contextvars.ContextVar[int] = contextvars.ContextVar("cron_user_id", default=0)
 
 
 def set_chat_context(chat_id: int, user_id: int):
-    """Set current chat context for cron job creation."""
-    global _current_chat_id, _current_user_id
-    _current_chat_id = chat_id
-    _current_user_id = user_id
+    """Set current chat context for cron job creation (async-safe)."""
+    _current_chat_id.set(chat_id)
+    _current_user_id.set(user_id)
 
 
 async def _cron_manager(args: dict) -> str:
@@ -68,13 +68,13 @@ async def _cron_manager(args: dict) -> str:
 
         next_run = compute_next_run(cron_expr)
         # Use provided chat_id or fall back to current context
-        resolved_chat_id = int(chat_id) if chat_id else _current_chat_id
+        resolved_chat_id = int(chat_id) if chat_id else _current_chat_id.get()
         job_id = create_cron_job(
             cron_expr=cron_expr,
             task=task,
             channel="telegram",
             chat_id=resolved_chat_id,
-            created_by=_current_user_id,
+            created_by=_current_user_id.get(),
             next_run=next_run,
         )
 

@@ -23,14 +23,16 @@ MODEL_CAPS_CACHE: dict[str, dict] = {}
 # ── Shared httpx client ──────────────────────────────────
 
 _shared_client: httpx.AsyncClient | None = None
+_client_lock = asyncio.Lock()
 
 
-def _get_client(timeout: float | httpx.Timeout = 30) -> httpx.AsyncClient:
-    """Get or create a shared httpx client. Use as context manager for streaming."""
+async def _get_client(timeout: float | httpx.Timeout = 30) -> httpx.AsyncClient:
+    """Get or create a shared httpx client with thread-safe initialization."""
     global _shared_client
-    if _shared_client is None or _shared_client.is_closed:
-        _shared_client = httpx.AsyncClient(timeout=timeout)
-    return _shared_client
+    async with _client_lock:
+        if _shared_client is None or _shared_client.is_closed:
+            _shared_client = httpx.AsyncClient(timeout=timeout)
+        return _shared_client
 
 
 async def _api_get(path: str, timeout: float = 10) -> httpx.Response:
@@ -417,6 +419,8 @@ def _build_chat_payload(
             payload["options"] = opts
         if settings.keep_alive != DEFAULT_MODEL_PARAMS["keep_alive"]:
             payload["keep_alive"] = _normalize_keep_alive(settings.keep_alive)
+    # Enable prompt caching (Ollama 0.5.0+) — avoids re-encoding system prompt
+    payload.setdefault("options", {})["cache_prompt"] = True
     if tools:
         payload["tools"] = tools
     if think:
