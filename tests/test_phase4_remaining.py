@@ -417,7 +417,7 @@ async def test_cron_context_isolation():
 
 def test_multi_agent_config_defaults():
     from openlama.config import get_config, get_config_bool, get_config_int
-    assert get_config_bool("multi_agent_enabled", False) is False
+    assert get_config_bool("multi_agent_enabled", True) is True
     assert get_config_int("worker_max_iterations", 5) == 5
     assert get_config_int("worker_timeout", 60) == 60
     assert get_config_int("max_workers", 5) == 5
