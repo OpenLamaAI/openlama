@@ -30,14 +30,15 @@ async def _list(args: dict) -> str:
     max_results = int(args.get("max_results", 20))
 
     def _run():
-        q = f"'{parent}' in parents" if parent else None
-        kwargs = {"pageSize": max_results, "fields": "files(id,name,mimeType,size,modifiedTime)", "supportsAllDrives": True, "includeItemsFromAllDrives": True}
-        if q:
-            kwargs["q"] = q
+        # Default to 'root' so unfiltered list shows root files, not entire Drive
+        target = parent or "root"
+        q = f"'{target}' in parents and trashed = false"
+        kwargs = {"q": q, "pageSize": max_results, "fields": "files(id,name,mimeType,size,modifiedTime)", "supportsAllDrives": True, "includeItemsFromAllDrives": True}
         files = _svc().files().list(**kwargs).execute().get("files", [])
         if not files:
             return "No files found."
-        return f"Files ({len(files)}):\n" + "\n".join(f"  {_format_file(f)}" for f in files)
+        label = f" in '{target}'" if parent else " (root)"
+        return f"Files ({len(files)}){label}:\n" + "\n".join(f"  {_format_file(f)}" for f in files)
     return await asyncio.to_thread(_run)
 
 
@@ -46,7 +47,9 @@ async def _search(args: dict) -> str:
     max_results = int(args.get("max_results", 10))
 
     def _run():
-        q = f"name contains '{query}' or fullText contains '{query}'"
+        # Escape single quotes in query to prevent Drive API query injection
+        safe_query = query.replace("'", "\\'")
+        q = f"name contains '{safe_query}' or fullText contains '{safe_query}'"
         files = _svc().files().list(
             q=q, pageSize=max_results,
             fields="files(id,name,mimeType,size,modifiedTime)",
@@ -189,11 +192,26 @@ async def _move(args: dict) -> str:
     file_id = args.get("file_id", "")
     parent = args.get("parent", "")
 
+    if not file_id:
+        return "Error: file_id is required."
+    if not parent:
+        return "Error: parent (destination folder ID) is required. Use 'list' to find folder IDs."
+
     def _run():
         svc = _svc()
+        # Retrieve current parents to remove (Google API requirement for move)
         current = svc.files().get(fileId=file_id, fields="parents", supportsAllDrives=True).execute()
         old_parents = ",".join(current.get("parents", []))
-        f = svc.files().update(fileId=file_id, addParents=parent, removeParents=old_parents, fields="id,name", supportsAllDrives=True).execute()
+        f = svc.files().update(
+            fileId=file_id,
+            addParents=parent,
+            removeParents=old_parents,
+            fields="id,name,parents",
+            supportsAllDrives=True,
+        ).execute()
+        new_parents = f.get("parents", [])
+        if parent not in new_parents:
+            return f"Warning: Move may have failed. File '{f['name']}' parents: {new_parents}"
         return f"Moved: {f['name']} to folder {parent}"
     return await asyncio.to_thread(_run)
 
@@ -201,6 +219,9 @@ async def _move(args: dict) -> str:
 async def _delete(args: dict) -> str:
     file_id = args.get("file_id", "")
     permanent = args.get("permanent", False)
+
+    if not file_id:
+        return "Error: file_id is required."
 
     def _run():
         if permanent:
