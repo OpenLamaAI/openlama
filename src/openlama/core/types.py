@@ -18,6 +18,25 @@ class ChatRequest:
 
 
 @dataclass
+class ToolResult:
+    """Structured tool execution result with success/error tracking."""
+    success: bool
+    data: str
+    error: str = ""
+    metadata: dict = field(default_factory=dict)
+
+    def to_message(self) -> str:
+        """Convert to message string for LLM context."""
+        if self.success:
+            return self.data
+        return f"[ERROR] {self.error}\n{self.data}" if self.data else f"[ERROR] {self.error}"
+
+    def __str__(self) -> str:
+        """String compatibility — existing code using str(result) still works."""
+        return self.to_message()
+
+
+@dataclass
 class ChatResponse:
     content: str = ""
     thinking: str = ""

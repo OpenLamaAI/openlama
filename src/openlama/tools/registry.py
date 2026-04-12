@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import traceback
 from dataclasses import dataclass, field
@@ -29,6 +30,16 @@ DANGEROUS_TOOLS = frozenset({
 def is_dangerous_tool(name: str) -> bool:
     """Check if a tool requires user confirmation."""
     return name in DANGEROUS_TOOLS
+
+
+# Network-dependent tools that benefit from retry on transient failures
+NETWORK_TOOLS = frozenset({
+    "web_search", "url_fetch",
+})
+
+_RETRYABLE_ERRORS = (ConnectionError, TimeoutError, OSError)
+MAX_TOOL_RETRIES = 2
+RETRY_DELAY = 1.0
 
 
 def _summarize_args(name: str, arguments: dict) -> str:
@@ -122,6 +133,29 @@ def format_tools_for_ollama(admin: bool = True) -> list[dict]:
     return tools
 
 
+def _validate_tool_args(tool: Tool, args: dict) -> tuple[bool, str]:
+    """Validate required parameters and basic type checks against tool schema."""
+    schema = tool.parameters
+    required = schema.get("required", [])
+
+    for param in required:
+        if param not in args:
+            return False, f"Missing required parameter: {param}"
+
+    properties = schema.get("properties", {})
+    for key, value in args.items():
+        if key in properties:
+            expected_type = properties[key].get("type")
+            if expected_type == "string" and not isinstance(value, str):
+                return False, f"Parameter '{key}' must be string, got {type(value).__name__}"
+            if expected_type == "integer" and not isinstance(value, int):
+                return False, f"Parameter '{key}' must be integer, got {type(value).__name__}"
+            if expected_type == "boolean" and not isinstance(value, bool):
+                return False, f"Parameter '{key}' must be boolean, got {type(value).__name__}"
+
+    return True, ""
+
+
 async def execute_tool(
     name: str,
     arguments: dict,
@@ -137,6 +171,12 @@ async def execute_tool(
     if not tool:
         return f"Tool not found: {name}"
 
+    # Validate arguments against schema
+    valid, error = _validate_tool_args(tool, arguments)
+    if not valid:
+        logger.warning("Tool %s args validation failed: %s", name, error)
+        return f"Tool argument error: {error}. Please check the parameters and try again."
+
     # Dangerous tool confirmation gate
     if confirm_fn and is_dangerous_tool(name):
         summary = _summarize_args(name, arguments)
@@ -149,11 +189,26 @@ async def execute_tool(
             log_tool_call(user_id, name, arguments, "[DENIED by user]", success=False)
             return f"Tool '{name}' execution was denied by user."
 
-    try:
-        result = await tool.execute(arguments)
-        log_tool_call(user_id, name, arguments, result, success=True)
-        return result
-    except Exception as e:
-        error_msg = f"Tool execution error ({name}): {str(e)[:500]}"
-        log_tool_call(user_id, name, arguments, error_msg, success=False)
-        return error_msg
+    # Retry logic for network-dependent tools
+    max_attempts = MAX_TOOL_RETRIES + 1 if name in NETWORK_TOOLS else 1
+    last_error = None
+    for attempt in range(max_attempts):
+        try:
+            result = await tool.execute(arguments)
+            log_tool_call(user_id, name, arguments, result, success=True)
+            return result
+        except _RETRYABLE_ERRORS as e:
+            last_error = e
+            if attempt < max_attempts - 1:
+                delay = RETRY_DELAY * (2 ** attempt)
+                logger.warning("Tool %s retry %d/%d after %.1fs: %s", name, attempt + 1, MAX_TOOL_RETRIES, delay, e)
+                await asyncio.sleep(delay)
+            else:
+                error_msg = f"Tool {name} failed after {max_attempts} attempts: {e}"
+                log_tool_call(user_id, name, arguments, error_msg, success=False)
+                return error_msg
+        except Exception as e:
+            error_msg = f"Tool execution error ({name}): {str(e)[:500]}"
+            log_tool_call(user_id, name, arguments, error_msg, success=False)
+            return error_msg
+    return f"Tool {name} failed: {last_error}"

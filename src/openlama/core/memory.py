@@ -1,9 +1,10 @@
 """Memory management — long-term (MEMORY.md) + episodic daily memories."""
 from __future__ import annotations
 
+import asyncio
 import re
 from pathlib import Path
-from datetime import datetime
+from datetime import datetime, timedelta
 
 from openlama.config import get_config, get_config_int
 from openlama.logger import get_logger
@@ -30,6 +31,11 @@ def load_memory() -> str:
     if p.exists():
         return p.read_text(encoding="utf-8")
     return ""
+
+
+async def async_load_memory() -> str:
+    """Non-blocking version of load_memory()."""
+    return await asyncio.to_thread(load_memory)
 
 
 def save_memory_entry(content: str, category: str = "other") -> str:
@@ -64,6 +70,11 @@ def save_memory_entry(content: str, category: str = "other") -> str:
     return entry
 
 
+async def async_save_memory_entry(content: str, category: str = "other") -> str:
+    """Non-blocking version of save_memory_entry()."""
+    return await asyncio.to_thread(save_memory_entry, content, category)
+
+
 # ── Episodic daily memory (memories/YYYY-MM-DD.md) ──────
 
 def save_daily_entry(content: str, source: str = "compression") -> str:
@@ -90,6 +101,11 @@ def save_daily_entry(content: str, source: str = "compression") -> str:
     path.write_text(existing, encoding="utf-8")
     logger.info("daily memory saved: %s [%s] %d chars", today, source, len(content))
     return str(path)
+
+
+async def async_save_daily_entry(content: str, source: str = "compression") -> str:
+    """Non-blocking version of save_daily_entry()."""
+    return await asyncio.to_thread(save_daily_entry, content, source)
 
 
 def list_daily_dates() -> list[dict]:
@@ -197,6 +213,30 @@ def search_daily_memories(
                 return results
 
     return results
+
+
+def cleanup_old_memories(max_days: int | None = None) -> int:
+    """Remove daily memory files older than max_days. Returns count of removed files."""
+    if max_days is None:
+        max_days = get_config_int("memory_gc_days", 90)
+    memories_dir = _daily_dir()
+    cutoff = datetime.now() - timedelta(days=max_days)
+    removed = 0
+
+    for f in memories_dir.glob("*.md"):
+        try:
+            date_str = f.stem  # YYYY-MM-DD
+            file_date = datetime.strptime(date_str, "%Y-%m-%d")
+            if file_date < cutoff:
+                f.unlink()
+                logger.info("Cleaned up old memory: %s", f.name)
+                removed += 1
+        except (ValueError, OSError):
+            pass
+
+    if removed:
+        logger.info("Memory GC: removed %d files older than %d days", removed, max_days)
+    return removed
 
 
 def extract_topics(ctx_items: list[dict]) -> str:

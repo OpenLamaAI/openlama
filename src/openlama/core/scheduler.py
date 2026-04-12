@@ -96,23 +96,29 @@ async def execute_job(job: dict) -> str:
 
     tools = format_tools_for_ollama(admin=True)
 
+    from openlama.config import get_config_int as _gci
+    job_timeout = _gci("cron_job_timeout", 180)
+
     try:
-        resp = await chat_with_ollama_full(model, messages, settings=settings, tools=tools, think=False)
+        async def _run_job():
+            resp = await chat_with_ollama_full(model, messages, settings=settings, tools=tools, think=False)
+            content = resp.get("content", "")
+            tool_calls = resp.get("tool_calls", [])
+            if tool_calls:
+                content, _, _ = await handle_tool_calls(
+                    uid, model, messages, tool_calls, settings,
+                    think=False, tools=tools,
+                )
+            return content.strip() if content else "(no response)"
 
-        content = resp.get("content", "")
-        tool_calls = resp.get("tool_calls", [])
-
-        # Handle tool calls if any
-        if tool_calls:
-            content, _, _ = await handle_tool_calls(
-                uid, model, messages, tool_calls, settings,
-                think=False, tools=tools,
-            )
-
-        result = content.strip() if content else "(no response)"
+        result = await asyncio.wait_for(_run_job(), timeout=job_timeout)
         logger.info("cron job #%d completed: %d chars", job_id, len(result))
         return result
 
+    except asyncio.TimeoutError:
+        error_msg = f"[Cron #{job_id}] Timed out after {job_timeout}s"
+        logger.error(error_msg)
+        return error_msg
     except Exception as e:
         error_msg = f"[Cron #{job_id}] Execution error: {e}"
         logger.error(error_msg)
@@ -160,7 +166,7 @@ async def _daily_memory_flush():
     and saves them to today's daily memory file.
     """
     from openlama.database import get_users_with_context, load_context, get_setting, set_setting
-    from openlama.core.memory import extract_topics, save_daily_entry
+    from openlama.core.memory import extract_topics, save_daily_entry, cleanup_old_memories
 
     today = time.strftime("%Y-%m-%d")
     last_flush = get_setting("last_daily_flush") or ""
@@ -185,6 +191,12 @@ async def _daily_memory_flush():
     set_setting("last_daily_flush", today)
     if flushed:
         logger.info("daily memory flush: %d user(s) saved", flushed)
+
+    # Run memory garbage collection alongside daily flush
+    try:
+        cleanup_old_memories()
+    except Exception as e:
+        logger.warning("Memory GC failed: %s", e)
 
 
 def _is_flush_hour() -> bool:
