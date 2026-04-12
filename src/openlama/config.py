@@ -103,6 +103,13 @@ _DEFAULTS = {
     "comfy_stop_delay_sec": "30",
     "comfy_workflow_txt2img": "txt2img_default",
     "comfy_workflow_img2img": "img2img_default",
+    # Multi-agent system (Phase 6)
+    "multi_agent_enabled": "false",
+    "worker_max_iterations": "5",
+    "worker_timeout": "60",
+    "max_workers": "5",
+    "delegation_min_text_length": "50",
+    "worker_max_result_size": "2000",
 }
 
 # ── Mobile (Termux) defaults override ─────────────────────
