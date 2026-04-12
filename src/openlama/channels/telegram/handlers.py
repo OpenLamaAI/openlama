@@ -89,7 +89,7 @@ from openlama.utils.file_processor import (
 )
 from openlama.utils.formatting import convert_markdown, split_message, chunks, reply_llm_answer
 from openlama.utils.streaming import stream_response_to_message
-from openlama.logger import get_logger
+from openlama.logger import get_logger, set_request_id
 
 logger = get_logger("telegram.handlers")
 
@@ -795,6 +795,7 @@ async def _do_chat_inner(
     file_context: str = "",
 ):
     uid = user.telegram_id
+    req_id = set_request_id()
     model = user.selected_model
 
     ok, msg = await ensure_ollama_running()

@@ -39,6 +39,7 @@ def setup_logger(
         return logger  # Already configured
 
     logger.setLevel(getattr(logging, level.upper(), logging.INFO))
+    logger.propagate = False  # Prevent duplicate logs from parent loggers
     # Include request_id in format when available
     fmt = logging.Formatter(
         "%(asctime)s [%(levelname)s] %(name)s [%(request_id)s]: %(message)s",

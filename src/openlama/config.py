@@ -104,7 +104,7 @@ _DEFAULTS = {
     "comfy_workflow_txt2img": "txt2img_default",
     "comfy_workflow_img2img": "img2img_default",
     # Multi-agent system (Phase 6)
-    "multi_agent_enabled": "false",
+    "multi_agent_enabled": "true",
     "worker_max_iterations": "5",
     "worker_timeout": "60",
     "max_workers": "5",
